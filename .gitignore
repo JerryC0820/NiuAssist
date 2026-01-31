@@ -1,0 +1,22 @@
+# Windows / CEP
+Thumbs.db
+.DS_Store
+*.log
+*.tmp
+*.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+
+# Build / dist
+/dist/
+/out/
+
+# IDE
+.vscode/
+.idea/

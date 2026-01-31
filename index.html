@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html" charset="UTF-8">
+  <title>牛牛助手</title>
+  <script>window.module = undefined;</script>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="side-nav">
+      <button class="side-login" title="登录">登录</button>
+      <button class="side-btn active" data-mode="browser" title="浏览器助手">🌐</button>
+      <button class="side-btn" data-mode="ai" title="豆包功能">
+        <img src="./img/doubao2.ico" alt="豆包">
+      </button>
+      <div class="side-badge">
+        <span class="badge-dot"></span>
+        <div class="badge-text">
+          <div>内测版</div>
+          <div>V1.0.0</div>
+        </div>
+      </div>
+    </aside>
+    <div class="main">
+  <div class="toolbar">
+    <div id="toolLabel" class="tool-label">牛牛助手</div>
+    <div class="group url-group">
+      <input id="urlInput" type="text" placeholder="输入网址 (https://...)" spellcheck="false">
+      <button id="goBtn" title="打开网址">前往</button>
+      <button id="bookmarkBtn" class="icon-btn" title="收藏夹">★</button>
+    </div>
+    <div class="group search-group hidden" id="siteSearchGroup">
+      <input id="siteSearchInput" type="text" placeholder="花瓣搜索" spellcheck="false">
+      <button id="siteSearchBtn" title="花瓣搜索">搜索</button>
+    </div>
+    <div id="captureBusy" class="capture-busy" title="采集中"><span id="captureBusyText"></span></div>
+    <div class="group action-group">
+      <button id="saveBtn" title="保存到收藏夹">保存</button>
+      <button id="openBtn">打开</button>
+      <button id="homeBtn" title="主页">主页</button>
+      <button id="clearSiteBtn" title="清理当前站点登录状态">退出</button>
+      <button id="backBtn" title="后退">&#x2190;</button>
+      <button id="forwardBtn" title="前进">&#x2192;</button>
+      <button id="reloadBtn" title="刷新">&#x21bb;</button>
+      <button id="injectBtn" class="capture-only" title="注入采集脚本">注入</button>
+    </div>
+  </div>
+  <div id="bookmarkPanel" class="bookmark-panel">
+    <div class="bookmark-header">
+      <span class="bookmark-title">收藏夹</span>
+      <button id="bookmarkClose" class="bookmark-close" title="关闭">×</button>
+    </div>
+    <div id="bookmarkList" class="bookmark-list"></div>
+  </div>
+  <div id="aiPanel" class="ai-panel">
+    <div class="ai-body">
+      <div class="ai-section">
+        <div class="ai-row">
+          <label>API 密钥</label>
+          <input id="aiKey" type="password" placeholder="sk-xxxx">
+        </div>
+        <div class="ai-row">
+          <label>接口地址</label>
+          <input id="aiBaseUrl" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3/">
+        </div>
+        <button id="aiSaveBtn" class="ai-save">保存设置</button>
+      </div>
+      <div class="ai-section">
+        <div class="ai-row inline">
+          <label>功能类型</label>
+          <select id="aiType">
+            <option value="image">图像</option>
+            <option value="video">视频</option>
+            <option value="text">文本</option>
+            <option value="3d">3D</option>
+            <option value="embedding">向量(文本)</option>
+            <option value="embedding-mm">向量(多模态)</option>
+          </select>
+          <label class="inline-label">精度</label>
+          <select id="aiTier">
+            <option value="lite">轻量</option>
+            <option value="pro">专业</option>
+          </select>
+        </div>
+        <div class="ai-row inline">
+          <label>模型选择</label>
+          <select id="aiModelSelect"></select>
+        </div>
+        <div class="ai-row ai-model-custom hidden">
+          <label>自定义</label>
+          <input id="aiModelCustom" type="text" placeholder="模型 ID">
+        </div>
+        <div id="aiModelPanel" class="ai-subpanel">
+          <div class="ai-row">
+            <label>模型列表</label>
+            <textarea id="aiModelList" rows="6" placeholder="JSON 数组或每行：名称|ID|类型|精度"></textarea>
+          </div>
+          <div class="ai-row ai-row-actions">
+            <button id="aiModelSave">保存列表</button>
+            <button id="aiModelReset">恢复默认</button>
+          </div>
+          <div class="ai-tip">类型支持 图像(image) / 视频(video) / 文本(text) / 3D(3d) / 向量(embedding/embedding-mm)，精度示例：lite / pro / standard，可选 quota 余量字段。</div>
+        </div>
+        <div class="ai-row ai-unsupported-only">
+          <label>提示</label>
+          <span class="ai-inline-text">该类型暂未接入接口，仅展示模型列表。</span>
+        </div>
+        <div class="ai-row inline ai-image-only">
+          <label>尺寸</label>
+          <select id="aiImageSizeSelect" class="ai-size-select"></select>
+          <input id="aiImageSizeCustom" type="text" class="ai-size-custom hidden" placeholder="自定义比例或尺寸">
+          <label class="inline-label">数量</label>
+          <input id="aiImageCount" type="number" min="1" max="4" value="1">
+        </div>
+        <div class="ai-row inline ai-image-only">
+          <label>图生图</label>
+          <input id="aiUseLayer" type="checkbox" class="ai-toggle">
+          <span class="ai-inline-text ai-use-layer-text">使用选中图层</span>
+          <label class="inline-label ai-insert-label">插入</label>
+          <select id="aiImageInsertMode" class="ai-insert-select">
+            <option value="insert">新图层</option>
+            <option value="replace">替换图层</option>
+          </select>
+        </div>
+        <div class="ai-row inline ai-video-only">
+          <label>首帧图</label>
+          <input id="aiVideoImage" type="text" placeholder="可选 URL">
+        </div>
+        <div class="ai-row ai-prompt-row ai-image-only ai-video-only">
+          <label>提示词</label>
+          <textarea id="aiPrompt" rows="3" placeholder="输入生成提示词"></textarea>
+        </div>
+        <div class="ai-row ai-text-only">
+          <label>文本任务</label>
+          <select id="aiTextTask">
+            <option value="rewrite">文本改写</option>
+            <option value="translate">翻译</option>
+            <option value="keywords">图标关键词推荐</option>
+            <option value="title">素材标题生成</option>
+            <option value="ps_text">PS 文本层生成</option>
+          </select>
+        </div>
+        <div class="ai-text-grid ai-text-only">
+          <div class="ai-col">
+            <label>输入内容</label>
+            <textarea id="aiTextInput" rows="6" placeholder="输入需要处理的文本"></textarea>
+          </div>
+          <div class="ai-col">
+            <label>输出内容</label>
+            <textarea id="aiTextOutput" rows="6" readonly></textarea>
+          </div>
+        </div>
+        <div class="ai-row ai-text-only ai-row-actions">
+          <button id="aiTextGenerate">生成文本</button>
+          <button id="aiTextInsert">插入PS文本层</button>
+        </div>
+        <button id="aiGenerateBtn" class="ai-generate ai-image-only ai-video-only">立即生成</button>
+        <div id="aiStatus" class="ai-status"></div>
+      </div>
+      <div class="ai-section">
+        <div class="ai-result-title">结果</div>
+        <div id="aiResult" class="ai-result"></div>
+      </div>
+    </div>
+  </div>
+  <div class="fav-bar">
+    <button id="favToggle" class="fav-toggle" title="展开/收起">▾</button>
+    <span id="siteTitle" class="site-title" title="网站名称">网站：-</span>
+    <div class="fav-controls">
+      <div class="fav-row">
+        <div class="sync-controls ctrl-group">
+        <label class="sync-label toggle-label">
+          <input id="captureModeToggle" type="checkbox">
+          采集素材模式
+        </label>
+        <label class="sync-label toggle-label">
+          <input id="syncToggle" type="checkbox">
+          同步网址
+        </label>
+        <label class="sync-label toggle-label">
+          <input id="syncTimerToggle" type="checkbox">
+          定时同步
+        </label>
+        <span class="sync-text">间隔</span>
+        <input id="syncInterval" type="number" min="1" max="60" value="4">
+        <span class="sync-text">秒</span>
+        </div>
+      </div>
+      <div class="fav-row">
+        <div class="scale-controls ctrl-group">
+        <label class="sync-label toggle-label">
+          <input id="scaleToggle" type="checkbox">
+          大图压缩
+        </label>
+        <span class="sync-text">最大边</span>
+        <input id="scaleMax" type="number" min="800" max="8000" value="3000">
+        <span class="sync-text">px</span>
+        </div>
+        <div class="compress-controls ctrl-group">
+        <label class="sync-label toggle-label">
+          <input id="jpegToggle" type="checkbox">
+          JPG 压缩
+        </label>
+        <span class="sync-text">质量</span>
+        <input id="jpegQuality" type="number" min="10" max="100" value="85">
+        </div>
+        <div class="compress-controls ctrl-group">
+        <label class="sync-label toggle-label">
+          <input id="pyToggle" type="checkbox">
+          Python 转码
+        </label>
+        </div>
+        <div class="compress-controls ctrl-group">
+        <label class="sync-label toggle-label">
+          <input id="origToggle" type="checkbox">
+          原图模式
+        </label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="captureHint" class="hint capture-hint">
+    右键或按住 Alt + 左键点击图标（IMG/SVG/CANVAS）即可插入到当前 Photoshop 文档。素材像素过大会引起卡顿，耐心等待。
+  </div>
+  <div class="frame-wrap">
+    <div id="browserHome" class="browser-home browser-only">
+      <div class="home-logo"></div>
+      <div class="home-title">浏览器助手</div>
+      <div class="home-input">
+        <input id="homeUrlInput" type="text" placeholder="请输入网址" spellcheck="false">
+        <button id="homeGoBtn">前往</button>
+      </div>
+      <div class="home-recent">
+        <div class="recent-title">最近访问</div>
+        <div id="recentList" class="recent-list"></div>
+      </div>
+    </div>
+    <iframe id="browser" src="about:blank"></iframe>
+  </div>
+  <div id="status" class="status capture-only">就绪。</div>
+
+  <script src="./lib/CSInterface.js"></script>
+  <script src="./js/main.js"></script>
+    </div>
+  </div>
+</body>
+</html>

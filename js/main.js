@@ -3415,6 +3415,17 @@
       }
     }
 
+    function hasBackgroundImage(el) {
+      try {
+        if (!el || !el.getBoundingClientRect) return false;
+        var style = window.getComputedStyle(el);
+        var bg = style && style.backgroundImage ? style.backgroundImage : '';
+        return !!(bg && bg !== 'none' && bg.indexOf('url(') !== -1);
+      } catch (e) {
+        return false;
+      }
+    }
+
     function iconFontToDataUrl(el) {
       try {
         var styleBefore = window.getComputedStyle(el, '::before');
@@ -3575,23 +3586,27 @@
       return null;
     }
 
+    function collectIconCandidates(card) {
+      if (!card || !card.querySelectorAll) return [];
+      var nodes = card.querySelectorAll('svg, img, canvas, i, span, div, a, button');
+      var list = nodes && nodes.length ? Array.prototype.slice.call(nodes) : [];
+      return list.filter(function (node) {
+        if (!node || !node.tagName) return false;
+        var tag = node.tagName.toUpperCase();
+        if (tag === 'IMG' || tag === 'SVG' || tag === 'CANVAS') return true;
+        if (isIconFontCandidate(node)) return true;
+        if (hasBackgroundImage(node)) return true;
+        return false;
+      });
+    }
+
     function pickLargestFromList(list) {
       return pickLargest(list);
     }
 
     function pickLargestIconInCard(card) {
-      if (!card || !card.querySelectorAll) return null;
-      var nodes = card.querySelectorAll('svg, img, canvas');
-      var candidates = nodes && nodes.length ? Array.prototype.slice.call(nodes) : [];
+      var candidates = collectIconCandidates(card);
       if (candidates.length) return pickLargestFromList(candidates);
-      var icons = card.querySelectorAll('i, span');
-      var iconCandidates = [];
-      if (icons && icons.length) {
-        icons.forEach(function (node) {
-          if (isIconFontCandidate(node)) iconCandidates.push(node);
-        });
-      }
-      if (iconCandidates.length) return pickLargestFromList(iconCandidates);
       return null;
     }
 
@@ -3623,15 +3638,13 @@
     }
 
     function pickNearestIconInCard(card, x, y) {
-      if (!card || !card.querySelectorAll) return null;
-      var nodes = card.querySelectorAll('svg, img, canvas, i, span');
-      var list = nodes && nodes.length ? Array.prototype.slice.call(nodes) : [];
+      var list = collectIconCandidates(card);
       if (!list.length) return null;
       var inside = list.filter(function (el) {
         if (!el || !el.tagName) return false;
         var tag = el.tagName.toUpperCase();
-        if (tag === 'I' || tag === 'SPAN') {
-          return isIconFontCandidate(el) && containsPoint(el, x, y);
+        if (tag === 'I' || tag === 'SPAN' || tag === 'DIV' || tag === 'A' || tag === 'BUTTON') {
+          return (isIconFontCandidate(el) || hasBackgroundImage(el)) && containsPoint(el, x, y);
         }
         return (tag === 'IMG' || tag === 'SVG' || tag === 'CANVAS') && containsPoint(el, x, y);
       });
@@ -3696,7 +3709,10 @@
           for (i = 0; i < list.length; i++) {
             var card = findIconfontCard(list[i]);
             if (card) {
-              var bestInCard = pickNearestIconInCard(card, x, y) || pickLargestIconInCard(card);
+              var candidates = collectIconCandidates(card);
+              var bestInCard = pickSmallestContaining(candidates, x, y) ||
+                pickNearestIconInCard(card, x, y) ||
+                pickLargestIconInCard(card);
               if (bestInCard) return bestInCard;
             }
           }

@@ -99,16 +99,16 @@ python -m pip install pillow
 ---
 
 ## 🗂️ 缓存目录
-默认缓存目录使用 CEP 返回的 APPDATA 位置（不同机器可能不同）：
-`<APPDATA>\NiuAssistCache`  
-（以实际系统返回为准，部分环境可能映射到 Photoshop 安装目录附近）
+默认缓存目录位于 **Photoshop 安装目录** 下：
+`<Photoshop>\invalidParam\NiuAssistCache`
+
+例如：
+`D:\software\Adobe\Adobe Photoshop 2025\invalidParam\NiuAssistCache`
 
 其中：
 - `images/` 图片缓存
 - `meta/` 元数据
 - `text/` 文本历史
-
-> 注：不同机器/环境下 APPDATA 可能被 CEP 指向到不同路径（以实际系统返回为准）。
 
 ---
 

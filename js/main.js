@@ -211,6 +211,8 @@
   var aiPythonMaxSideInput = document.getElementById('aiPythonMaxSide');
   var aiPythonQualityInput = document.getElementById('aiPythonQuality');
   var aiPromptInput = document.getElementById('aiPrompt');
+  var aiPromptWrap = document.getElementById('aiPromptWrap');
+  var aiPromptExpandBtn = document.getElementById('aiPromptExpand');
   var aiVideoImageInput = document.getElementById('aiVideoImage');
   var aiTextTaskSelect = document.getElementById('aiTextTask');
   var aiTextInput = document.getElementById('aiTextInput');
@@ -239,6 +241,7 @@
   var aiHistoryCloseBtn = document.getElementById('aiHistoryClose');
   var aiHistoryMaxBtn = document.getElementById('aiHistoryMax');
   var aiHistoryFixedBtn = document.getElementById('aiHistoryFixed');
+  var aiHistorySizeRange = document.getElementById('aiHistorySizeRange');
   var aiHistoryTabs = document.getElementById('aiHistoryTabs');
   var aiHistoryImagesEl = document.getElementById('aiHistoryImages');
   var aiHistoryTextsEl = document.getElementById('aiHistoryTexts');
@@ -304,9 +307,19 @@
   var aiPreviewItem = null;
   var aiPreviewIsMax = false;
   var aiPreviewDrag = { active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 };
+  var aiHistoryRecordMap = {};
+  var aiHistoryPromptOpenCard = null;
+  var aiContextMenu = null;
+  var AI_ALBUM_SIZE_KEY = 'niuassist_album_thumb';
   var aiInitDone = false;
 
-  var nodeRequire = (typeof window !== 'undefined' && window.require) ? window.require : null;
+  var nodeRequire = null;
+  if (typeof window !== 'undefined') {
+    nodeRequire = window.require ||
+      (window.cep_node && window.cep_node.require) ||
+      (window.__adobe_cep__ && window.__adobe_cep__.require) ||
+      null;
+  }
   var pythonBusy = false;
   var pythonExecCache = '';
   var captureBusyCount = 0;
@@ -596,14 +609,14 @@
     if (!mods) return '';
     var base = '';
     try {
-      base = cs.getSystemPath(SystemPath.APPDATA);
+      base = cs.getSystemPath(SystemPath.HOST_APPLICATION);
     } catch (e) {
       base = '';
     }
     var dir = '';
     try {
       if (base) {
-        dir = mods.path.join(base, 'NiuAssistCache');
+        dir = mods.path.join(base, 'invalidParam', 'NiuAssistCache');
       } else {
         dir = mods.path.join(extPath, 'cache');
       }
@@ -773,6 +786,7 @@
       job.item.rawPath = job.rawPath;
       if (!job.usePython || job.isData) {
         job.item.localPath = job.rawPath;
+        updateAiResultCard(job.item);
         saveImageHistoryRecord(job);
         setAiStatus('缓存完成，可快速插入。', 'ok');
         if (job.item) {
@@ -815,6 +829,7 @@
           saveImageHistoryRecord(job);
           setAiStatus('压缩完成，可快速插入。', 'ok');
         }
+        updateAiResultCard(job.item);
         if (job.item) {
           job.item.progress = 100;
           updateAiJobProgress(job.item.id, job.item.progress);
@@ -1000,6 +1015,7 @@
   function renderHistoryImages(records) {
     if (!aiHistoryImagesEl) return;
     aiHistoryImagesEl.innerHTML = '';
+    aiHistoryRecordMap = {};
     if (!records.length) {
       aiHistoryImagesEl.innerHTML = '<div class="ai-text">暂无图片历史</div>';
       return;
@@ -1010,8 +1026,10 @@
       try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
     }
     records.forEach(function (rec) {
+      if (rec && rec.id) aiHistoryRecordMap[rec.id] = rec;
       var card = document.createElement('div');
       card.className = 'ai-history-item';
+      if (rec && rec.id) card.dataset.recordId = rec.id;
       var thumb = document.createElement('div');
       thumb.className = 'ai-history-thumb';
       var localPath = rec.localPath || rec.insertPath || '';
@@ -1034,12 +1052,10 @@
       if (showUrl) {
         var img = document.createElement('img');
         img.src = showUrl;
-        img.addEventListener('load', function () {
-          var w = img.naturalWidth || img.width || 0;
-          var h = img.naturalHeight || img.height || 0;
-          if (w > 0 && h > 0) {
-            thumb.style.setProperty('--thumb-ratio', w + ' / ' + h);
-          }
+        img.addEventListener('dblclick', function (ev) {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          if (!showUrl) return;
+          openAiPreview({ url: showUrl, localPath: insertPath, prompt: rec.prompt, recordId: rec.id });
         });
         img.addEventListener('error', function () {
           if (img && img.parentNode) img.parentNode.removeChild(img);
@@ -1056,7 +1072,7 @@
         infoBtn.title = '提示词';
         infoBtn.addEventListener('click', function (ev) {
           if (ev && ev.stopPropagation) ev.stopPropagation();
-          card.classList.toggle('show-prompt');
+          toggleHistoryPrompt(card, false);
         });
         thumb.appendChild(infoBtn);
         var promptPanel = document.createElement('div');
@@ -1071,7 +1087,9 @@
         copyBtn.textContent = '复制提示词';
         copyBtn.addEventListener('click', function (ev) {
           if (ev && ev.stopPropagation) ev.stopPropagation();
-          copyToClipboard(rec.prompt);
+          copyToClipboard(rec.prompt, function (ok) {
+            if (ok) flashButtonText(copyBtn, '已复制');
+          });
         });
         promptActions.appendChild(copyBtn);
         var polishBtn = document.createElement('button');
@@ -1086,40 +1104,15 @@
         });
         thumb.appendChild(promptPanel);
       }
+      thumb.addEventListener('contextmenu', function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        openHistoryContextMenu(rec, card, showUrl, insertPath, e.clientX, e.clientY);
+      });
       card.appendChild(thumb);
       var meta = document.createElement('div');
       meta.className = 'ai-history-meta';
-      meta.textContent = rec.model || rec.size || '历史记录';
+      meta.textContent = rec.model || rec.size || '图片';
       card.appendChild(meta);
-      var actions = document.createElement('div');
-      actions.className = 'ai-history-actions';
-      var insertBtn = document.createElement('button');
-      insertBtn.textContent = '导入';
-      insertBtn.addEventListener('click', function () {
-        var item = { url: rec.url || showUrl, localPath: insertPath || '' };
-        insertAiImageUrl(item, (aiState && aiState.imageInsertMode === 'replace') ? 'replace' : 'insert');
-      });
-      actions.appendChild(insertBtn);
-      var previewBtn = document.createElement('button');
-      previewBtn.textContent = '预览';
-      previewBtn.addEventListener('click', function () {
-        if (!showUrl) return;
-        openAiPreview({ url: showUrl, prompt: rec.prompt, recordId: rec.id });
-      });
-      actions.appendChild(previewBtn);
-      var openBtn = document.createElement('button');
-      openBtn.textContent = '打开';
-      openBtn.addEventListener('click', function () {
-        ensureHistoryLocalFile(rec, function (path) {
-          if (!path || !fileExists(path)) {
-            setAiStatus('本地文件不存在。', 'err');
-            return;
-          }
-          openFileInExplorer(path);
-        });
-      });
-      actions.appendChild(openBtn);
-      card.appendChild(actions);
       aiHistoryImagesEl.appendChild(card);
     });
   }
@@ -1163,6 +1156,251 @@
     });
   }
 
+  function closeHistoryPromptPanels(exceptCard) {
+    if (!aiHistoryImagesEl) return;
+    var cards = aiHistoryImagesEl.querySelectorAll('.ai-history-item.show-prompt');
+    cards.forEach(function (card) {
+      if (exceptCard && card === exceptCard) return;
+      card.classList.remove('show-prompt');
+      var polish = card.querySelector('.ai-history-polish');
+      if (polish) polish.classList.remove('open');
+    });
+    if (!exceptCard) aiHistoryPromptOpenCard = null;
+  }
+
+  function toggleHistoryPrompt(card, openPolish) {
+    if (!card) return;
+    if (card.classList.contains('show-prompt')) {
+      card.classList.remove('show-prompt');
+      var polish = card.querySelector('.ai-history-polish');
+      if (polish) polish.classList.remove('open');
+      aiHistoryPromptOpenCard = null;
+      return;
+    }
+    closeHistoryPromptPanels();
+    card.classList.add('show-prompt');
+    aiHistoryPromptOpenCard = card;
+    if (openPolish) {
+      var panel = card.querySelector('.ai-history-polish');
+      if (panel) panel.classList.add('open');
+    }
+  }
+
+  function removeAiContextMenu() {
+    if (aiContextMenu && aiContextMenu.parentNode) {
+      aiContextMenu.parentNode.removeChild(aiContextMenu);
+    }
+    aiContextMenu = null;
+  }
+
+  function openAiContextMenu(items, x, y) {
+    removeAiContextMenu();
+    if (!items || !items.length) return;
+    var menu = document.createElement('div');
+    menu.className = 'ai-context-menu';
+    items.forEach(function (item) {
+      if (item && item.type === 'sep') {
+        var sep = document.createElement('div');
+        sep.className = 'ai-context-sep';
+        menu.appendChild(sep);
+        return;
+      }
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = item.label || '';
+      btn.addEventListener('click', function (e) {
+        if (e && e.stopPropagation) e.stopPropagation();
+        removeAiContextMenu();
+        if (item && typeof item.onClick === 'function') item.onClick();
+      });
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    var rect = menu.getBoundingClientRect();
+    var left = x;
+    var top = y;
+    var pad = 8;
+    if (left + rect.width + pad > window.innerWidth) left = window.innerWidth - rect.width - pad;
+    if (top + rect.height + pad > window.innerHeight) top = window.innerHeight - rect.height - pad;
+    if (left < pad) left = pad;
+    if (top < pad) top = pad;
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+    aiContextMenu = menu;
+  }
+
+  function copyImageToClipboard(path, cb) {
+    var mods = getNodeModules();
+    if (!mods || !mods.child_process) {
+      if (cb) cb(false);
+      return;
+    }
+    try {
+      var safe = String(path || '').replace(/'/g, "''");
+      if (typeof process !== 'undefined' && process.platform === 'darwin') {
+        mods.child_process.exec('osascript -e \'set the clipboard to (read (POSIX file "' + safe + '") as JPEG picture)\'', function (err) {
+          if (cb) cb(!err);
+        });
+        return;
+      }
+      var cmd = 'powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $img=[System.Drawing.Image]::FromFile(\\'' + safe + '\\'); [System.Windows.Forms.Clipboard]::SetImage($img)"';
+      mods.child_process.exec(cmd, function (err) {
+        if (cb) cb(!err);
+      });
+    } catch (e) {
+      if (cb) cb(false);
+    }
+  }
+
+  function openImageAsNewDocument(path) {
+    if (!path) return;
+    var script = 'psexCapture_openImageAsNewDocumentFromPath(' + JSON.stringify(path) + ');';
+    cs.evalScript(script, function (res) {
+      if (String(res || '').indexOf('error:') === 0) {
+        setAiStatus('打开失败：' + res.replace(/^error:/, ''), 'err');
+      }
+    });
+  }
+
+  function replaceImageFromPath(path, url) {
+    if (!path && !url) return;
+    if (path) {
+      var dataUrl = fileToDataUrl(path);
+      if (!dataUrl) {
+        setAiStatus('读取本地文件失败。', 'err');
+        return;
+      }
+      replaceDataUrlInPs(dataUrl);
+      return;
+    }
+    fetchToDataUrl(url, function (dataUrl) {
+      if (!dataUrl) {
+        setAiStatus('获取图片失败。', 'err');
+        return;
+      }
+      replaceDataUrlInPs(dataUrl);
+    });
+  }
+
+  function openHistoryContextMenu(rec, card, showUrl, insertPath, x, y) {
+    if (!rec) return;
+    var prompt = rec.prompt || '';
+    var items = [
+      { label: '打开预览', onClick: function () {
+        var url = showUrl || rec.url || '';
+        if (!url) return;
+        openAiPreview({ url: url, localPath: insertPath, prompt: prompt, recordId: rec.id });
+      }},
+      { label: '导入为新图层', onClick: function () {
+        var item = { url: rec.url || showUrl, localPath: insertPath || '' };
+        insertAiImageUrl(item, 'insert');
+      }},
+      { label: '替换当前图层', onClick: function () {
+        if (insertPath) {
+          replaceImageFromPath(insertPath, rec.url || showUrl);
+          return;
+        }
+        ensureHistoryLocalFile(rec, function (path) {
+          replaceImageFromPath(path, rec.url || showUrl);
+        });
+      }},
+      { label: '打开为新文档', onClick: function () {
+        ensureHistoryLocalFile(rec, function (path) {
+          if (!path) {
+            setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          openImageAsNewDocument(path);
+        });
+      }},
+      { label: '复制', onClick: function () {
+        ensureHistoryLocalFile(rec, function (path) {
+          if (!path) {
+            if (rec.url) copyToClipboard(rec.url);
+            else setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          copyImageToClipboard(path, function (ok) {
+            setAiStatus(ok ? '已复制图片。' : '复制失败。', ok ? 'ok' : 'err');
+          });
+        });
+      }},
+      { label: '打开所在文件夹', onClick: function () {
+        ensureHistoryLocalFile(rec, function (path) {
+          if (!path) {
+            setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          openFileInExplorer(path);
+        });
+      }},
+      { type: 'sep' },
+      { label: '复制提示词', onClick: function () { if (prompt) copyToClipboard(prompt); } },
+      { label: '提示词润色并应用', onClick: function () { toggleHistoryPrompt(card, true); } }
+    ];
+    openAiContextMenu(items, x, y);
+  }
+
+  function openPreviewContextMenu(item, x, y) {
+    if (!item) return;
+    var prompt = item.prompt || '';
+    function resolveLocal(cb) {
+      if (item.localPath) return cb(item.localPath);
+      if (item.recordId && aiHistoryRecordMap[item.recordId]) {
+        return ensureHistoryLocalFile(aiHistoryRecordMap[item.recordId], cb);
+      }
+      cb('');
+    }
+    var items = [
+      { label: '打开预览', onClick: function () { openAiPreview(item); } },
+      { label: '导入为新图层', onClick: function () { insertAiImageUrl(item, 'insert'); } },
+      { label: '替换当前图层', onClick: function () {
+        resolveLocal(function (path) {
+          replaceImageFromPath(path, item.url);
+        });
+      }},
+      { label: '打开为新文档', onClick: function () {
+        resolveLocal(function (path) {
+          if (!path) {
+            setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          openImageAsNewDocument(path);
+        });
+      }},
+      { label: '复制', onClick: function () {
+        resolveLocal(function (path) {
+          if (!path) {
+            if (item.url) copyToClipboard(item.url);
+            else setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          copyImageToClipboard(path, function (ok) {
+            setAiStatus(ok ? '已复制图片。' : '复制失败。', ok ? 'ok' : 'err');
+          });
+        });
+      }},
+      { label: '打开所在文件夹', onClick: function () {
+        resolveLocal(function (path) {
+          if (!path) {
+            setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          openFileInExplorer(path);
+        });
+      }},
+      { type: 'sep' },
+      { label: '复制提示词', onClick: function () { if (prompt) copyToClipboard(prompt); } },
+      { label: '提示词润色并应用', onClick: function () {
+        if (item.recordId && aiHistoryRecordMap[item.recordId]) {
+          var card = aiHistoryImagesEl ? aiHistoryImagesEl.querySelector('.ai-history-item[data-record-id="' + item.recordId + '"]') : null;
+          if (card) toggleHistoryPrompt(card, true);
+        }
+      } }
+    ];
+    openAiContextMenu(items, x, y);
+  }
+
   function setHistoryTab(tab) {
     var t = tab === 'text' ? 'text' : 'image';
     if (aiHistoryTabs) {
@@ -1192,6 +1430,15 @@
     aiHistoryEl.classList.remove('open');
   }
 
+  function flashButtonText(btn, text, ms) {
+    if (!btn) return;
+    var original = btn.textContent;
+    btn.textContent = text;
+    setTimeout(function () {
+      btn.textContent = original;
+    }, ms || 900);
+  }
+
   function copyToClipboard(text, cb) {
     var value = text || '';
     if (!value) {
@@ -1217,14 +1464,23 @@
           });
           return true;
         }
-        mods.child_process.exec('cmd /c type "' + tmp + '" | clip', function (err) {
-          finish(!err);
+        var safe = tmp.replace(/"/g, '\\"');
+        var psCmd = 'powershell -NoProfile -Sta -Command "Get-Content -Raw -Encoding UTF8 -Path \\"' + safe + '\\" | Set-Clipboard"';
+        mods.child_process.exec(psCmd, function (err) {
+          if (err) {
+            mods.child_process.exec('cmd /c type "' + tmp + '" | clip', function (err2) {
+              finish(!err2);
+            });
+            return;
+          }
+          finish(true);
         });
         return true;
       } catch (e) {
         return false;
       }
     }
+    if (tryNodeClipboard()) return;
     try {
       if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(value).then(function () {
@@ -1268,7 +1524,7 @@
         return;
       }
     } catch (e3) {}
-    if (!tryNodeClipboard()) finish(false);
+    finish(false);
   }
 
   function updateHistoryRecord(rec, patch) {
@@ -1403,10 +1659,18 @@
     var mods = getNodeModules();
     if (!mods || !mods.child_process) return;
     try {
+      var target = filePath;
+      if (mods.path && typeof mods.path.normalize === 'function') {
+        target = mods.path.normalize(filePath);
+      }
+      if (mods.fs && target && !mods.fs.existsSync(target)) {
+        setAiStatus('本地文件不存在。', 'err');
+        return;
+      }
       if (typeof process !== 'undefined' && process.platform === 'darwin') {
-        mods.child_process.spawn('open', ['-R', filePath]);
+        mods.child_process.spawn('open', ['-R', target]);
       } else {
-        mods.child_process.spawn('explorer.exe', ['/select,' + filePath], { windowsHide: true });
+        mods.child_process.spawn('explorer.exe', ['/select,' + target], { windowsHide: true });
       }
     } catch (e) {
       setAiStatus('打开失败：' + e, 'err');
@@ -2447,10 +2711,43 @@
     });
   }
 
+  function positionSizePanel() {
+    if (!aiImageSizePanel || !aiImageSizeInput) return;
+    try {
+      var picker = aiImageSizeInput.parentElement || aiImageSizeInput;
+      var rect = picker.getBoundingClientRect();
+      var spaceBelow = (window.innerHeight || 0) - rect.bottom - 12;
+      var spaceAbove = rect.top - 12;
+      var openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      var available = openUp ? spaceAbove : spaceBelow;
+      var height = Math.max(200, Math.min(520, available));
+      var vw = window.innerWidth || 0;
+      var left = rect.left;
+      var width = rect.width;
+      if (width < 260) width = 260;
+      if (vw && width > vw - 16) width = vw - 16;
+      if (vw) {
+        if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
+        if (left < 8) left = 8;
+      }
+      aiImageSizePanel.style.position = 'fixed';
+      aiImageSizePanel.style.left = left + 'px';
+      aiImageSizePanel.style.width = width + 'px';
+      aiImageSizePanel.style.maxHeight = height + 'px';
+      aiImageSizePanel.style.height = height + 'px';
+      if (openUp) {
+        aiImageSizePanel.style.top = (rect.top - height - 6) + 'px';
+      } else {
+        aiImageSizePanel.style.top = (rect.bottom + 6) + 'px';
+      }
+    } catch (e) {}
+  }
+
   function openSizePanel() {
     if (!aiImageSizePanel) return;
     buildSizePanel();
     aiImageSizePanel.classList.remove('hidden');
+    positionSizePanel();
   }
 
   function closeSizePanel() {
@@ -2556,6 +2853,27 @@
     var hasKey = !!keyVal;
     var collapsed = stored === null ? hasKey : stored === '1';
     setAiAuthCollapsed(collapsed, true);
+  }
+
+  function setAlbumThumbSize(value, store) {
+    var v = parseInt(value, 10);
+    if (isNaN(v) || v < 120) v = 160;
+    if (v > 260) v = 260;
+    try {
+      document.documentElement.style.setProperty('--albumThumb', v + 'px');
+    } catch (e) {}
+    if (aiHistorySizeRange) aiHistorySizeRange.value = String(v);
+    if (store) {
+      try { localStorage.setItem(AI_ALBUM_SIZE_KEY, String(v)); } catch (e2) {}
+    }
+  }
+
+  function initAlbumThumbSize() {
+    var stored = null;
+    try { stored = localStorage.getItem(AI_ALBUM_SIZE_KEY); } catch (e) {}
+    var v = parseInt(stored || '', 10);
+    if (isNaN(v)) v = aiHistorySizeRange ? parseInt(aiHistorySizeRange.value || '160', 10) : 160;
+    setAlbumThumbSize(v, false);
   }
 
   function getFeatureByType(type) {
@@ -2687,15 +3005,42 @@
   }
 
   function positionFeaturePanel() {
-    if (!aiTypePanel || !aiPanel) return;
+    if (!aiTypePanel || !aiTypeDropdown) return;
     resetFeaturePanelPosition();
     try {
-      var footer = aiPanel.querySelector('.ai-footer');
-      if (!footer) return;
-      var panelRect = aiTypePanel.getBoundingClientRect();
-      var footerRect = footer.getBoundingClientRect();
-      var available = footerRect.top - panelRect.top - 12;
+      var toggleRect = (aiTypeToggle || aiTypeDropdown).getBoundingClientRect();
+      var panelTop = toggleRect.bottom + 8;
+      var anchor = aiGenerateBtn || aiPanel.querySelector('.ai-generate');
+      if (!anchor) {
+        var footer = aiPanel ? aiPanel.querySelector('.ai-footer') : null;
+        anchor = footer || anchor;
+      }
+      if (!anchor) return;
+      var anchorRect = anchor.getBoundingClientRect();
+      var available = anchorRect.top - panelTop - 12;
       if (available < 200) available = 200;
+      var bodyRect = null;
+      try {
+        var body = aiPanel ? aiPanel.querySelector('.ai-body') : null;
+        bodyRect = (body || aiPanel || aiTypeDropdown).getBoundingClientRect();
+      } catch (e1) { bodyRect = null; }
+      var left = toggleRect.left;
+      var width = toggleRect.width;
+      if (bodyRect) {
+        left = bodyRect.left;
+        width = bodyRect.width;
+      }
+      var vw = window.innerWidth || 0;
+      if (vw && width > vw - 16) width = vw - 16;
+      if (vw) {
+        if (left + width > vw - 8) left = Math.max(8, vw - width - 8);
+        if (left < 8) left = 8;
+      }
+      aiTypePanel.style.position = 'fixed';
+      aiTypePanel.style.left = left + 'px';
+      aiTypePanel.style.top = panelTop + 'px';
+      aiTypePanel.style.width = width + 'px';
+      aiTypePanel.style.height = available + 'px';
       aiTypePanel.style.maxHeight = available + 'px';
     } catch (e) {}
   }
@@ -2790,6 +3135,7 @@
     updateImageSizeUI();
     updateAiAuthSummary();
     initAiAuthCollapse();
+    initAlbumThumbSize();
   }
 
   function syncAiStateFromControls() {
@@ -3278,13 +3624,18 @@
 
   function openAiPreview(item) {
     if (!aiPreviewEl || !aiPreviewImg || !item) return;
-    aiPreviewItem = item;
-    updatePreviewPrompt(item);
+    var previewItem = item || {};
+    var src = previewItem.url;
+    if (previewItem.localPath) {
+      src = formatFileUrl(previewItem.localPath);
+    }
+    aiPreviewItem = Object.assign({}, previewItem, { url: src });
+    updatePreviewPrompt(previewItem);
     aiPreviewImg.onload = function () {
       if (aiPreviewMode === 'fit') setAiPreviewMode('fit');
       else applyPreviewTransform();
     };
-    aiPreviewImg.src = item.url;
+    aiPreviewImg.src = src;
     aiPreviewScale = 1;
     aiPreviewTranslateX = 0;
     aiPreviewTranslateY = 0;
@@ -3446,6 +3797,39 @@
     }
   }
 
+  function updateAiResultCard(item) {
+    if (!aiResultEl || !item) return;
+    var card = aiResultEl.querySelector('.ai-result-item[data-id="' + item.id + '"]');
+    if (!card) return;
+    var src = '';
+    if (item.localPath) src = formatFileUrl(item.localPath);
+    else if (item.url) src = item.url;
+    if (!src) return;
+    var img = card.querySelector('img.ai-result-thumb');
+    if (!img) {
+      img = document.createElement('img');
+      img.className = 'ai-result-thumb';
+      img.addEventListener('load', function () {
+        var w = img.naturalWidth || img.width || 0;
+        var h = img.naturalHeight || img.height || 0;
+        if (w > 0 && h > 0) {
+          card.style.setProperty('--thumb-ratio', w + ' / ' + h);
+        }
+      });
+      img.addEventListener('dblclick', function (ev) {
+        if (ev && ev.stopPropagation) ev.stopPropagation();
+        selectAiImage(item.id);
+        openAiPreview(item);
+      });
+      var placeholder = card.querySelector('.ai-result-thumb.placeholder');
+      if (placeholder && placeholder.parentNode) {
+        placeholder.parentNode.removeChild(placeholder);
+      }
+      card.insertBefore(img, card.firstChild);
+    }
+    img.src = src;
+  }
+
   function initAiPlaceholders(count, promptText) {
     aiGeneratedImages = [];
     aiResultItems = [];
@@ -3516,17 +3900,11 @@
       aiGeneratedImages = [];
       aiSelectedId = null;
     }
-    if (!items || !items.length) {
-      var empty = document.createElement('div');
-      empty.className = 'ai-text';
-      empty.textContent = '暂无结果';
-      aiResultEl.appendChild(empty);
-      return;
-    }
     if (type === 'image') {
+      var hasItems = !!(items && items.length);
       var promptText = (aiPromptInput && aiPromptInput.value || '').trim();
       var now = Date.now();
-      aiGeneratedImages = items.map(function (it, idx) {
+      aiGeneratedImages = (items || []).map(function (it, idx) {
         var id = it.id || ('ai_' + now + '_' + idx);
         var url = it.url || '';
         var progress = (typeof it.progress === 'number') ? it.progress : (url ? 70 : 5);
@@ -3550,6 +3928,7 @@
       var insertMode = aiState && aiState.imageInsertMode === 'replace' ? 'replace' : 'insert';
       var insertBtn = document.createElement('button');
       insertBtn.textContent = insertMode === 'replace' ? '替换图层' : '插入PS';
+      insertBtn.disabled = !hasItems;
       insertBtn.addEventListener('click', function () {
         var item = getSelectedAiItem();
         if (!item) return;
@@ -3568,13 +3947,29 @@
 
       var previewBtn = document.createElement('button');
       previewBtn.textContent = '预览';
+      previewBtn.disabled = !hasItems;
       previewBtn.addEventListener('click', function () {
         var item = getSelectedAiItem();
         if (item) openAiPreview(item);
       });
       actionBar.appendChild(previewBtn);
 
-        aiResultEl.appendChild(actionBar);
+      var historyBtn = document.createElement('button');
+      historyBtn.textContent = '相册';
+      historyBtn.addEventListener('click', function () {
+        openAiHistory(getActiveHistoryTab());
+      });
+      actionBar.appendChild(historyBtn);
+
+      aiResultEl.appendChild(actionBar);
+
+      if (!hasItems) {
+        var empty = document.createElement('div');
+        empty.className = 'ai-text';
+        empty.textContent = '暂无结果';
+        aiResultEl.appendChild(empty);
+        return;
+      }
 
       var grid = document.createElement('div');
       grid.className = 'ai-result-grid' + (aiGeneratedImages.length === 1 ? ' single' : '');
@@ -3593,6 +3988,11 @@
             if (w > 0 && h > 0) {
               card.style.setProperty('--thumb-ratio', w + ' / ' + h);
             }
+          });
+          img.addEventListener('dblclick', function (ev) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            selectAiImage(item.id);
+            openAiPreview(item);
           });
           card.appendChild(img);
         } else {
@@ -3623,7 +4023,9 @@
           copyBtn.textContent = '复制提示词';
           copyBtn.addEventListener('click', function (ev) {
             if (ev && ev.stopPropagation) ev.stopPropagation();
-            copyToClipboard(item.prompt);
+            copyToClipboard(item.prompt, function (ok) {
+              if (ok) flashButtonText(copyBtn, '已复制');
+            });
           });
           tip.appendChild(copyBtn);
           card.appendChild(tip);
@@ -3631,9 +4033,6 @@
 
         card.addEventListener('click', function () {
           selectAiImage(item.id);
-        });
-        card.addEventListener('dblclick', function () {
-          openAiPreview(item);
         });
         grid.appendChild(card);
       });
@@ -4663,6 +5062,9 @@
     if (aiTypeDropdown && aiTypeDropdown.classList.contains('open')) {
       positionFeaturePanel();
     }
+    if (aiImageSizePanel && !aiImageSizePanel.classList.contains('hidden')) {
+      positionSizePanel();
+    }
   });
 
   if (aiBtn) {
@@ -4706,6 +5108,12 @@
   }
 
   if (arkApiLink) {
+    try {
+      arkApiLink.setAttribute('href', ARK_API_URL);
+      if (!arkApiLink.getAttribute('title')) {
+        arkApiLink.setAttribute('title', '点击跳转火山方舟配置API');
+      }
+    } catch (e0) {}
     arkApiLink.addEventListener('click', function (ev) {
       if (ev && ev.preventDefault) ev.preventDefault();
       if (ev && ev.stopPropagation) ev.stopPropagation();
@@ -5003,7 +5411,11 @@
   }
   if (aiPreviewCopyPromptBtn) {
     aiPreviewCopyPromptBtn.addEventListener('click', function () {
-      if (aiPreviewItem && aiPreviewItem.prompt) copyToClipboard(aiPreviewItem.prompt);
+      if (aiPreviewItem && aiPreviewItem.prompt) {
+        copyToClipboard(aiPreviewItem.prompt, function (ok) {
+          if (ok) flashButtonText(aiPreviewCopyPromptBtn, '已复制');
+        });
+      }
     });
   }
   if (aiPreviewEl) {
@@ -5044,6 +5456,11 @@
         setAiPreviewMode('fit');
       }
     });
+    aiPreviewBody.addEventListener('contextmenu', function (e) {
+      if (!aiPreviewItem) return;
+      if (e && e.preventDefault) e.preventDefault();
+      openPreviewContextMenu(aiPreviewItem, e.clientX, e.clientY);
+    });
   }
   document.addEventListener('mousemove', function (e) {
     if (!aiPreviewDrag.active || !aiPreviewBody) return;
@@ -5077,6 +5494,17 @@
       openAiHistory(getActiveHistoryTab());
     });
   }
+  if (aiHistorySizeRange) {
+    aiHistorySizeRange.addEventListener('input', function (e) {
+      var val = e && e.target ? e.target.value : aiHistorySizeRange.value;
+      setAlbumThumbSize(val, true);
+    });
+  }
+  if (aiPromptExpandBtn && aiPromptWrap) {
+    aiPromptExpandBtn.addEventListener('click', function () {
+      aiPromptWrap.classList.toggle('expanded');
+    });
+  }
   if (aiHistoryEl) {
     aiHistoryEl.addEventListener('click', function (e) {
       if (e.target && e.target.classList && e.target.classList.contains('ai-history-backdrop')) {
@@ -5086,6 +5514,23 @@
   }
 
   document.addEventListener('mousedown', function (e) {
+    if (aiContextMenu && (!e || !aiContextMenu.contains(e.target))) {
+      removeAiContextMenu();
+    }
+    if (aiHistoryEl && aiHistoryEl.classList.contains('open')) {
+      var inPrompt = false;
+      try {
+        inPrompt = !!(e && e.target && e.target.closest && (e.target.closest('.ai-history-prompt') || e.target.closest('.ai-history-info-btn')));
+      } catch (e1) { inPrompt = false; }
+      if (!inPrompt) closeHistoryPromptPanels();
+    }
+    if (aiImageSizePanel && !aiImageSizePanel.classList.contains('hidden')) {
+      var inSize = false;
+      try {
+        inSize = !!(e && e.target && e.target.closest && (e.target.closest('#aiImageSizePanel') || e.target.closest('#aiImageSizeInput') || e.target.closest('#aiImageSizeToggle')));
+      } catch (e2) { inSize = false; }
+      if (!inSize) closeSizePanel();
+    }
     if (aiModelPanel && aiModelPanel.classList.contains('open')) {
       if (!aiModelPanel.contains(e.target) && !(aiModelManageBtn && aiModelManageBtn.contains(e.target))) {
         aiModelPanel.classList.remove('open');

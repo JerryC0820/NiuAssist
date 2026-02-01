@@ -181,7 +181,10 @@
         </div>
         <div class="ai-row ai-prompt-row ai-image-only ai-video-only">
           <label>提示词</label>
-          <textarea id="aiPrompt" rows="3" placeholder="输入生成提示词"></textarea>
+          <div id="aiPromptWrap" class="ai-prompt-wrap">
+            <textarea id="aiPrompt" rows="3" placeholder="输入生成提示词"></textarea>
+            <button id="aiPromptExpand" class="ai-prompt-expand" type="button" title="展开/收起">⤢</button>
+          </div>
         </div>
         <div class="ai-row ai-text-only">
           <label>文本任务</label>
@@ -210,7 +213,7 @@
       <div class="ai-section ai-result-section">
         <div class="ai-result-header">
           <div class="ai-result-title">结果</div>
-          <button id="aiHistoryFixed" class="ai-result-history">历史</button>
+          <button id="aiHistoryFixed" class="ai-result-history">相册</button>
         </div>
         <div id="aiResult" class="ai-result"></div>
       </div>
@@ -250,7 +253,13 @@
     <div class="ai-history-backdrop"></div>
     <div class="ai-history-card">
       <div class="ai-history-toolbar">
-        <span class="ai-history-title">历史记录</span>
+        <span class="ai-history-title">相册</span>
+        <div class="ai-history-controls">
+          <label class="ai-history-size">
+            <span>缩略图</span>
+            <input id="aiHistorySizeRange" type="range" min="120" max="260" value="160">
+          </label>
+        </div>
         <div class="ai-history-tools">
           <button id="aiHistoryMax" class="ai-history-max">最大化</button>
           <button id="aiHistoryClose" class="ai-history-close">×</button>

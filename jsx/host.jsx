@@ -384,6 +384,18 @@ function psexCapture_placeFileByPath(filePath) {
     }
 }
 
+function psexCapture_openImageAsNewDocumentFromPath(filePath) {
+    try {
+        if (!filePath) return 'no_path';
+        var file = new File(filePath);
+        if (!file.exists) return 'not_found';
+        app.open(file);
+        return 'opened';
+    } catch (e) {
+        return 'error:' + e;
+    }
+}
+
 function psexCapture_base64Decode(data) {
     var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
     var output = '';

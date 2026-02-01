@@ -41,3 +41,11 @@ All notable changes to this project will be documented in this file.
 - Preview supports zoom/pan and maximization for large windows.
 - History window can maximize/restore and follows panel resizing.
 - Img2img export uses active-layer file export (no extra PS document).
+
+## [1.0.5] - 2026-02-01
+### Updated
+- Feature picker tiles resized to smaller squares with larger centered icons.
+- Ark console label now opens external browser via link click.
+### Fixed
+- CEP Node require fallback restored for file/copy operations.
+- Clipboard copy on Windows now uses PowerShell STA to improve reliability.

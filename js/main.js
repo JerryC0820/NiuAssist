@@ -26,6 +26,7 @@
   var AI_MODEL_VERSION = '2026-01-30-full';
   var AI_DEBUG_KEY = 'psex_ai_debug';
   var AI_AUTH_COLLAPSE_KEY = 'niu_ai_auth_collapsed';
+  var ARK_API_URL = 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D';
   var SYNC_DEFAULTS = { enabled: false, interval: 4, timerEnabled: false };
   var SCALE_DEFAULTS = { enabled: true, maxSide: 3000 };
   var JPEG_DEFAULTS = { enabled: false, quality: 85 };
@@ -180,6 +181,7 @@
   var aiAuthStatus = document.getElementById('aiAuthStatus');
   var aiKeyInput = document.getElementById('aiKey');
   var aiBaseUrlInput = document.getElementById('aiBaseUrl');
+  var arkApiLink = document.getElementById('arkApiLink');
   var aiSaveBtn = document.getElementById('aiSaveBtn');
   var aiTypeSelect = document.getElementById('aiType');
   var aiTypeDropdown = document.getElementById('aiTypeDropdown');
@@ -4701,6 +4703,27 @@
 
   if (aiBaseUrlInput) {
     aiBaseUrlInput.addEventListener('input', updateAiAuthSummary);
+  }
+
+  if (arkApiLink) {
+    arkApiLink.addEventListener('click', function (ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      var url = ARK_API_URL;
+      try {
+        if (cs && typeof cs.openURLInDefaultBrowser === 'function') {
+          cs.openURLInDefaultBrowser(url);
+          return;
+        }
+      } catch (e) {}
+      try {
+        if (window && window.cep && window.cep.util && typeof window.cep.util.openURLInDefaultBrowser === 'function') {
+          window.cep.util.openURLInDefaultBrowser(url);
+          return;
+        }
+      } catch (e2) {}
+      try { window.open(url); } catch (e3) {}
+    });
   }
 
   if (aiTypeToggle) {

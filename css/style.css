@@ -1174,6 +1174,35 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   letter-spacing: 0.2px;
 }
 
+.ai-link-label {
+  color: #9ad0ff;
+  text-decoration: none;
+  position: relative;
+  cursor: pointer;
+}
+
+.ai-link-label:hover {
+  color: #b7deff;
+  text-decoration: underline;
+}
+
+.ai-link-label[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin-top: 6px;
+  background: rgba(20, 20, 20, 0.95);
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #cfd8e3;
+  white-space: nowrap;
+  z-index: 80;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
+}
+
 .ai-row.inline label {
   width: auto;
   min-width: 52px;

@@ -235,6 +235,7 @@
   var aiPreviewCopyPromptBtn = document.getElementById('aiPreviewCopyPrompt');
   var aiHistoryEl = document.getElementById('aiHistory');
   var aiHistoryCloseBtn = document.getElementById('aiHistoryClose');
+  var aiHistoryMaxBtn = document.getElementById('aiHistoryMax');
   var aiHistoryFixedBtn = document.getElementById('aiHistoryFixed');
   var aiHistoryTabs = document.getElementById('aiHistoryTabs');
   var aiHistoryImagesEl = document.getElementById('aiHistoryImages');
@@ -293,6 +294,11 @@
   var aiResultItems = [];
   var aiPreviewMode = 'fit';
   var aiPreviewScale = 1;
+  var aiPreviewTranslateX = 0;
+  var aiPreviewTranslateY = 0;
+  var AI_PREVIEW_MIN_SCALE = 0.25;
+  var AI_PREVIEW_MAX_SCALE = 4;
+  var aiHistoryIsMax = false;
   var aiPreviewItem = null;
   var aiPreviewIsMax = false;
   var aiPreviewDrag = { active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 };
@@ -1010,9 +1016,6 @@
       var rawPath = rec.rawPath || '';
       var showUrl = '';
       var insertPath = '';
-      var deleteBtn = document.createElement('button');
-      deleteBtn.textContent = '删除';
-      deleteBtn.classList.add('hidden');
       if (fileExists(localPath)) {
         showUrl = formatFileUrl(localPath);
         insertPath = localPath;
@@ -1025,11 +1028,9 @@
       function markMissing() {
         thumb.classList.add('missing');
         thumb.textContent = '已过期';
-        if (deleteBtn) deleteBtn.classList.remove('hidden');
       }
-      var img = null;
       if (showUrl) {
-        img = document.createElement('img');
+        var img = document.createElement('img');
         img.src = showUrl;
         img.addEventListener('load', function () {
           var w = img.naturalWidth || img.width || 0;
@@ -1046,6 +1047,43 @@
       } else {
         markMissing();
       }
+      if (rec.prompt) {
+        var infoBtn = document.createElement('button');
+        infoBtn.className = 'ai-history-info-btn';
+        infoBtn.textContent = 'i';
+        infoBtn.title = '提示词';
+        infoBtn.addEventListener('click', function (ev) {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          card.classList.toggle('show-prompt');
+        });
+        thumb.appendChild(infoBtn);
+        var promptPanel = document.createElement('div');
+        promptPanel.className = 'ai-history-prompt';
+        var promptText = document.createElement('div');
+        promptText.className = 'ai-history-prompt-text';
+        promptText.textContent = rec.prompt;
+        promptPanel.appendChild(promptText);
+        var promptActions = document.createElement('div');
+        promptActions.className = 'ai-history-prompt-actions';
+        var copyBtn = document.createElement('button');
+        copyBtn.textContent = '复制提示词';
+        copyBtn.addEventListener('click', function (ev) {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          copyToClipboard(rec.prompt);
+        });
+        promptActions.appendChild(copyBtn);
+        var polishBtn = document.createElement('button');
+        polishBtn.textContent = '润色';
+        promptActions.appendChild(polishBtn);
+        promptPanel.appendChild(promptActions);
+        var polishPanel = buildPromptPolishPanel(rec, card);
+        promptPanel.appendChild(polishPanel);
+        polishBtn.addEventListener('click', function (ev) {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          if (polishPanel) polishPanel.classList.toggle('open');
+        });
+        thumb.appendChild(promptPanel);
+      }
       card.appendChild(thumb);
       var meta = document.createElement('div');
       meta.className = 'ai-history-meta';
@@ -1054,7 +1092,7 @@
       var actions = document.createElement('div');
       actions.className = 'ai-history-actions';
       var insertBtn = document.createElement('button');
-      insertBtn.textContent = '导入图层';
+      insertBtn.textContent = '导入';
       insertBtn.addEventListener('click', function () {
         var item = { url: rec.url || showUrl, localPath: insertPath || '' };
         insertAiImageUrl(item, (aiState && aiState.imageInsertMode === 'replace') ? 'replace' : 'insert');
@@ -1067,26 +1105,17 @@
         openAiPreview({ url: showUrl, prompt: rec.prompt, recordId: rec.id });
       });
       actions.appendChild(previewBtn);
-      deleteBtn.addEventListener('click', function () {
-        deleteHistoryRecord(rec);
+      var openBtn = document.createElement('button');
+      openBtn.textContent = '打开';
+      openBtn.addEventListener('click', function () {
+        if (!insertPath || !fileExists(insertPath)) {
+          setAiStatus('本地文件不存在。', 'err');
+          return;
+        }
+        openFileInExplorer(insertPath);
       });
-      actions.appendChild(deleteBtn);
+      actions.appendChild(openBtn);
       card.appendChild(actions);
-      if (rec.prompt) {
-        var tip = document.createElement('div');
-        tip.className = 'ai-history-tip';
-        var tipText = document.createElement('div');
-        tipText.textContent = rec.prompt;
-        tip.appendChild(tipText);
-        var copyBtn = document.createElement('button');
-        copyBtn.textContent = '复制提示词';
-        copyBtn.addEventListener('click', function (ev) {
-          if (ev && ev.stopPropagation) ev.stopPropagation();
-          copyToClipboard(rec.prompt);
-        });
-        tip.appendChild(copyBtn);
-        card.appendChild(tip);
-      }
       aiHistoryImagesEl.appendChild(card);
     });
   }
@@ -1151,6 +1180,7 @@
     renderHistoryTexts(texts);
     setHistoryTab(tab || 'image');
     aiHistoryEl.classList.add('open');
+    setAiHistoryMax(aiHistoryIsMax);
   }
 
   function closeAiHistory() {
@@ -1223,6 +1253,168 @@
     } catch (e) {
       return [];
     }
+  }
+
+  function openFileInExplorer(filePath) {
+    if (!filePath) return;
+    var mods = getNodeModules();
+    if (!mods || !mods.child_process) return;
+    try {
+      if (typeof process !== 'undefined' && process.platform === 'darwin') {
+        mods.child_process.spawn('open', ['-R', filePath]);
+      } else {
+        mods.child_process.spawn('explorer.exe', ['/select,' + filePath], { windowsHide: true });
+      }
+    } catch (e) {
+      setAiStatus('打开失败：' + e, 'err');
+    }
+  }
+
+  function buildPromptPolishPanel(rec, card) {
+    var panel = document.createElement('div');
+    panel.className = 'ai-history-polish';
+    var textModels = AI_MODEL_DEFAULTS.filter(function (m) { return m.type === 'text'; });
+    var modelRow = document.createElement('div');
+    modelRow.className = 'ai-history-polish-row';
+    var modelLabel = document.createElement('span');
+    modelLabel.textContent = '模型';
+    var modelSelect = document.createElement('select');
+    if (!textModels.length) {
+      var emptyOpt = document.createElement('option');
+      emptyOpt.value = '';
+      emptyOpt.textContent = '无可用文本模型';
+      modelSelect.appendChild(emptyOpt);
+    } else {
+      textModels.forEach(function (m) {
+        var opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        modelSelect.appendChild(opt);
+      });
+    }
+    modelRow.appendChild(modelLabel);
+    modelRow.appendChild(modelSelect);
+    panel.appendChild(modelRow);
+
+    var strengthRow = document.createElement('div');
+    strengthRow.className = 'ai-history-polish-row';
+    var strengthLabel = document.createElement('span');
+    strengthLabel.textContent = '强度';
+    var strengthSelect = document.createElement('select');
+    [
+      { value: 'light', label: '轻' },
+      { value: 'medium', label: '标准' },
+      { value: 'strong', label: '强' }
+    ].forEach(function (item) {
+      var opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      strengthSelect.appendChild(opt);
+    });
+    strengthRow.appendChild(strengthLabel);
+    strengthRow.appendChild(strengthSelect);
+    panel.appendChild(strengthRow);
+
+    var targetRow = document.createElement('div');
+    targetRow.className = 'ai-history-polish-row';
+    var targetLabel = document.createElement('span');
+    targetLabel.textContent = '目标';
+    var targetSelect = document.createElement('select');
+    [
+      { value: 'simple', label: '简约' },
+      { value: 'rich', label: '丰富' },
+      { value: 'pro', label: '保持但更专业' }
+    ].forEach(function (item) {
+      var opt = document.createElement('option');
+      opt.value = item.value;
+      opt.textContent = item.label;
+      targetSelect.appendChild(opt);
+    });
+    targetRow.appendChild(targetLabel);
+    targetRow.appendChild(targetSelect);
+    panel.appendChild(targetRow);
+
+    var actionRow = document.createElement('div');
+    actionRow.className = 'ai-history-polish-row';
+    var applyBtn = document.createElement('button');
+    applyBtn.textContent = '应用润色';
+    var undoBtn = document.createElement('button');
+    undoBtn.textContent = '撤销';
+    actionRow.appendChild(applyBtn);
+    actionRow.appendChild(undoBtn);
+    panel.appendChild(actionRow);
+
+    var originPrompt = rec && rec.prompt ? String(rec.prompt) : '';
+    if (card && originPrompt) card.dataset.originPrompt = originPrompt;
+
+    applyBtn.addEventListener('click', function (ev) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      if (!originPrompt) return;
+      requestPromptPolish(originPrompt, modelSelect.value, strengthSelect.value, targetSelect.value, function (result) {
+        if (!result) return;
+        if (aiPromptInput) aiPromptInput.value = result;
+        setAiStatus('已写入提示词。', 'ok');
+      });
+    });
+    undoBtn.addEventListener('click', function (ev) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      var original = (card && card.dataset && card.dataset.originPrompt) ? card.dataset.originPrompt : originPrompt;
+      if (aiPromptInput) aiPromptInput.value = original || '';
+      setAiStatus('已撤销到原提示词。', '');
+    });
+    return panel;
+  }
+
+  function requestPromptPolish(prompt, modelId, strength, target, cb) {
+    var settings = getAiSettings();
+    if (!settings.apiKey) {
+      setAiStatus('请先填写 API 密钥。', 'err');
+      return;
+    }
+    if (!modelId) {
+      setAiStatus('请选择润色模型。', 'err');
+      return;
+    }
+    var baseUrl = normalizeBaseUrl(settings.baseUrl);
+    var targetLabel = target === 'rich' ? '丰富' : (target === 'pro' ? '保持但更专业' : '简约');
+    var strengthLabel = strength === 'strong' ? '强' : (strength === 'light' ? '轻' : '标准');
+    var polishPrompt = [
+      '请对以下提示词进行润色。',
+      '目标：' + targetLabel + '。',
+      '强度：' + strengthLabel + '。',
+      '仅输出润色后的提示词，不要解释。',
+      '原提示词：' + prompt
+    ].join('\n');
+    var useResponses = modelId.indexOf('translation') !== -1;
+    var endpoint = useResponses ? 'responses' : 'chat/completions';
+    var payload = useResponses
+      ? { model: modelId, input: polishPrompt }
+      : { model: modelId, messages: [
+        { role: 'system', content: '你是提示词润色助手，只输出润色后的提示词，不要解释。' },
+        { role: 'user', content: polishPrompt }
+      ] };
+    setAiStatus('提示词润色中...', '');
+    fetchJsonWithStatus(baseUrl + endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + settings.apiKey
+      },
+      body: JSON.stringify(payload)
+    }, function (res) {
+      if (!res.ok) {
+        setAiStatus('润色失败：' + formatApiError(res), 'err');
+        return;
+      }
+      var json = res.data || {};
+      var text = extractTextResult(json);
+      if (!text) {
+        setAiStatus('润色失败：未返回结果。', 'err');
+        return;
+      }
+      if (cb) cb(String(text).trim());
+      setAiStatus('润色完成。', 'ok');
+    });
   }
 
   function saveRecentList(list) {
@@ -2714,9 +2906,48 @@
     });
   }
 
-  function getActiveLayerDataUrl(cb) {
+  function filePathToFileUrl(filePath) {
+    if (!filePath) return '';
+    var p = String(filePath).replace(/\\/g, '/');
+    if (/^[A-Za-z]:/.test(p)) p = '/' + p;
+    return 'file://' + p;
+  }
+
+  function fileToDataUrl(filePath) {
+    var mods = getNodeModules();
+    if (!mods || !mods.fs || !mods.path) return '';
+    try {
+      var ext = mods.path.extname(filePath || '').toLowerCase();
+      var mime = 'image/png';
+      if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+      else if (ext === '.webp') mime = 'image/webp';
+      else if (ext === '.gif') mime = 'image/gif';
+      var buf = mods.fs.readFileSync(filePath);
+      return 'data:' + mime + ';base64,' + buf.toString('base64');
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function getActiveLayerDataUrl(cb, targetW, targetH) {
     if (!cb) return;
-    var script = 'psexCapture_exportActiveLayerToDataUrl();';
+    var mods = getNodeModules();
+    if (!mods || !mods.path) {
+      cb(null, 'NodeJS 未启用');
+      return;
+    }
+    var dir = getAiCacheDir();
+    if (!dir || !ensureDirPath(mods, dir)) {
+      cb(null, '缓存目录不可用');
+      return;
+    }
+    var outPath = '';
+    try { outPath = mods.path.join(dir, 'layer_' + Date.now() + '.png'); } catch (e) {}
+    if (!outPath) {
+      cb(null, '无法创建缓存文件');
+      return;
+    }
+    var script = 'psexCapture_exportActiveLayerToFile(' + JSON.stringify(outPath) + ');';
     cs.evalScript(script, function (res) {
       if (!res || typeof res !== 'string') {
         cb(null, '无法读取选中图层。');
@@ -2724,7 +2955,6 @@
       }
       if (res.indexOf('error:') === 0) {
         var detail = res.replace(/^error:/, '') || '读取失败';
-        if (detail === 'bounds') detail = '读取图层范围失败';
         cb(null, detail);
         return;
       }
@@ -2736,15 +2966,37 @@
         cb(null, '没有选中图层。');
         return;
       }
-      if (res === 'no_size') {
-        cb(null, '选中图层没有可用像素。');
-        return;
-      }
-      if (res.indexOf('data:') !== 0) {
+      if (res !== 'ok') {
         cb(null, '选中图层导出异常。');
         return;
       }
-      cb(res, '');
+      var maxSide = Math.max(parseInt(targetW || 0, 10) || 0, parseInt(targetH || 0, 10) || 0);
+      var usePython = !!(aiState && aiState.aiPythonSpeed);
+      if (usePython && maxSide > 0) {
+        var fileUrl = filePathToFileUrl(outPath);
+        runPythonTranscode(fileUrl, { referer: '', title: '' }, function (err, pyOutPath) {
+          if (err) {
+            var fallback = fileToDataUrl(outPath);
+            if (!fallback) return cb(null, '读取图层失败。');
+            cb(fallback);
+            return;
+          }
+          var dataUrl = fileToDataUrl(pyOutPath || outPath);
+          if (!dataUrl) return cb(null, '读取图层失败。');
+          cb(dataUrl);
+        }, {
+          maxSide: maxSide,
+          format: 'png',
+          quality: aiState.aiPythonQuality || 80
+        });
+        return;
+      }
+      var dataUrl = fileToDataUrl(outPath);
+      if (!dataUrl) {
+        cb(null, '读取图层失败。');
+        return;
+      }
+      cb(dataUrl, '');
     });
   }
 
@@ -2775,48 +3027,74 @@
     }
   }
 
-  function applyPreviewScale(scale) {
+  function getPreviewMetrics() {
+    if (!aiPreviewBody || !aiPreviewImg) return null;
+    var iw = aiPreviewImg.naturalWidth || aiPreviewImg.width || 0;
+    var ih = aiPreviewImg.naturalHeight || aiPreviewImg.height || 0;
+    if (!iw || !ih) return null;
+    var vw = aiPreviewBody.clientWidth || 1;
+    var vh = aiPreviewBody.clientHeight || 1;
+    return { iw: iw, ih: ih, vw: vw, vh: vh };
+  }
+
+  function clampPreviewTransform(scale, tx, ty) {
+    var m = getPreviewMetrics();
+    if (!m) return { scale: scale, x: tx, y: ty };
+    var w = m.iw * scale;
+    var h = m.ih * scale;
+    if (w <= m.vw) tx = (m.vw - w) / 2;
+    else tx = Math.min(0, Math.max(m.vw - w, tx));
+    if (h <= m.vh) ty = (m.vh - h) / 2;
+    else ty = Math.min(0, Math.max(m.vh - h, ty));
+    return { scale: scale, x: tx, y: ty };
+  }
+
+  function applyPreviewTransform() {
     if (!aiPreviewImg) return;
-    var w = aiPreviewImg.naturalWidth || aiPreviewImg.width || 0;
-    var h = aiPreviewImg.naturalHeight || aiPreviewImg.height || 0;
-    if (!w || !h) return;
-    aiPreviewImg.style.maxWidth = 'none';
-    aiPreviewImg.style.maxHeight = 'none';
-    aiPreviewImg.style.width = Math.round(w * scale) + 'px';
-    aiPreviewImg.style.height = Math.round(h * scale) + 'px';
+    var m = getPreviewMetrics();
+    if (!m) return;
+    aiPreviewImg.style.width = m.iw + 'px';
+    aiPreviewImg.style.height = m.ih + 'px';
+    var clamped = clampPreviewTransform(aiPreviewScale, aiPreviewTranslateX, aiPreviewTranslateY);
+    aiPreviewScale = clamped.scale;
+    aiPreviewTranslateX = clamped.x;
+    aiPreviewTranslateY = clamped.y;
+    aiPreviewImg.style.transform = 'translate(' + Math.round(aiPreviewTranslateX) + 'px,' + Math.round(aiPreviewTranslateY) + 'px) scale(' + aiPreviewScale + ')';
     if (aiPreviewBody) {
-      aiPreviewBody.classList.toggle('is-pan', scale > 1);
+      aiPreviewBody.classList.toggle('is-pan', aiPreviewScale > 1.01);
     }
   }
 
   function setAiPreviewMode(mode) {
     aiPreviewMode = mode === 'fit' ? 'fit' : 'scale';
-    if (!aiPreviewImg) return;
+    var m = getPreviewMetrics();
+    if (!m) return;
     if (aiPreviewMode === 'fit') {
-      aiPreviewScale = 1;
-      aiPreviewImg.style.width = '';
-      aiPreviewImg.style.height = '';
-      aiPreviewImg.style.maxWidth = '100%';
-      aiPreviewImg.style.maxHeight = '100%';
-      if (aiPreviewBody) {
-        aiPreviewBody.scrollLeft = 0;
-        aiPreviewBody.scrollTop = 0;
-        aiPreviewBody.classList.remove('is-pan');
-        aiPreviewBody.classList.remove('dragging');
-      }
-    } else {
-      applyPreviewScale(aiPreviewScale || 1);
+      var s = Math.min(m.vw / m.iw, m.vh / m.ih);
+      if (!isFinite(s) || s <= 0) s = 1;
+      aiPreviewScale = Math.max(AI_PREVIEW_MIN_SCALE, Math.min(AI_PREVIEW_MAX_SCALE, s));
+      aiPreviewTranslateX = (m.vw - m.iw * aiPreviewScale) / 2;
+      aiPreviewTranslateY = (m.vh - m.ih * aiPreviewScale) / 2;
     }
+    applyPreviewTransform();
   }
 
-  function setAiPreviewScale(scale) {
-    var s = Math.max(0.25, Math.min(4, Number(scale) || 1));
-    aiPreviewScale = s;
+  function setAiPreviewScale(scale, anchorX, anchorY) {
+    var m = getPreviewMetrics();
+    if (!m) return;
+    var newScale = Math.max(AI_PREVIEW_MIN_SCALE, Math.min(AI_PREVIEW_MAX_SCALE, Number(scale) || 1));
+    var ax = (typeof anchorX === 'number') ? anchorX : (m.vw / 2);
+    var ay = (typeof anchorY === 'number') ? anchorY : (m.vh / 2);
+    var imgX = (ax - aiPreviewTranslateX) / (aiPreviewScale || 1);
+    var imgY = (ay - aiPreviewTranslateY) / (aiPreviewScale || 1);
+    aiPreviewScale = newScale;
+    aiPreviewTranslateX = ax - imgX * newScale;
+    aiPreviewTranslateY = ay - imgY * newScale;
     aiPreviewMode = 'scale';
-    applyPreviewScale(aiPreviewScale);
+    applyPreviewTransform();
   }
 
-  function zoomPreviewStep(dir) {
+  function zoomPreviewStep(dir, anchorX, anchorY) {
     var levels = [0.5, 1, 2, 4];
     var current = aiPreviewScale || 1;
     var idx = -1;
@@ -2832,7 +3110,7 @@
     var next = idx + (dir > 0 ? 1 : -1);
     if (next < 0) next = 0;
     if (next >= levels.length) next = levels.length - 1;
-    setAiPreviewScale(levels[next]);
+    setAiPreviewScale(levels[next], anchorX, anchorY);
   }
 
   function togglePreviewMax() {
@@ -2842,6 +3120,17 @@
     aiPreviewIsMax = !aiPreviewIsMax;
     card.classList.toggle('is-max', aiPreviewIsMax);
     if (aiPreviewMaxBtn) aiPreviewMaxBtn.textContent = aiPreviewIsMax ? '还原' : '最大化';
+    if (aiPreviewMode === 'fit') setAiPreviewMode('fit');
+    else applyPreviewTransform();
+  }
+
+  function setAiHistoryMax(force) {
+    if (!aiHistoryEl) return;
+    var card = aiHistoryEl.querySelector('.ai-history-card');
+    if (!card) return;
+    aiHistoryIsMax = (typeof force === 'boolean') ? force : !aiHistoryIsMax;
+    card.classList.toggle('is-max', aiHistoryIsMax);
+    if (aiHistoryMaxBtn) aiHistoryMaxBtn.textContent = aiHistoryIsMax ? '还原' : '最大化';
   }
 
   function openAiPreview(item) {
@@ -2850,13 +3139,14 @@
     updatePreviewPrompt(item);
     aiPreviewImg.onload = function () {
       if (aiPreviewMode === 'fit') setAiPreviewMode('fit');
-      else applyPreviewScale(aiPreviewScale || 1);
+      else applyPreviewTransform();
     };
     aiPreviewImg.src = item.url;
+    aiPreviewScale = 1;
+    aiPreviewTranslateX = 0;
+    aiPreviewTranslateY = 0;
     setAiPreviewMode('fit');
     if (aiPreviewBody) {
-      aiPreviewBody.scrollLeft = 0;
-      aiPreviewBody.scrollTop = 0;
       aiPreviewBody.classList.remove('dragging');
     }
     if (aiPreviewMaxBtn) {
@@ -3527,6 +3817,9 @@
     };
 
     if (settings.imageUseLayer) {
+      var sizeInfo = parseStrictSize(size) || parseSize(size);
+      var targetW = sizeInfo ? sizeInfo.w : 0;
+      var targetH = sizeInfo ? sizeInfo.h : 0;
       setAiStatus('正在读取选中图层...', '');
       getActiveLayerDataUrl(function (dataUrl, errMsg) {
         if (!dataUrl) {
@@ -3534,7 +3827,7 @@
           return;
         }
         doRequest(dataUrl);
-      });
+      }, targetW, targetH);
     } else {
       doRequest(null);
     }
@@ -4558,28 +4851,46 @@
   }
   if (aiPreviewBody) {
     aiPreviewBody.addEventListener('wheel', function (e) {
-      if (!e || !e.ctrlKey) return;
+      if (!e) return;
       if (e.preventDefault) e.preventDefault();
-      if (e.deltaY < 0) zoomPreviewStep(1);
-      else zoomPreviewStep(-1);
+      var rect = aiPreviewBody.getBoundingClientRect();
+      var px = e.clientX - rect.left;
+      var py = e.clientY - rect.top;
+      var factor = e.deltaY < 0 ? 1.1 : 0.9;
+      setAiPreviewScale(aiPreviewScale * factor, px, py);
     });
     aiPreviewBody.addEventListener('mousedown', function (e) {
-      if (!aiPreviewBody.classList.contains('is-pan')) return;
+      if (e.button !== 0) return;
       aiPreviewDrag.active = true;
-      aiPreviewDrag.startX = e.pageX;
-      aiPreviewDrag.startY = e.pageY;
-      aiPreviewDrag.scrollLeft = aiPreviewBody.scrollLeft;
-      aiPreviewDrag.scrollTop = aiPreviewBody.scrollTop;
+      aiPreviewDrag.startX = e.clientX;
+      aiPreviewDrag.startY = e.clientY;
+      aiPreviewDrag.scrollLeft = aiPreviewTranslateX;
+      aiPreviewDrag.scrollTop = aiPreviewTranslateY;
       aiPreviewBody.classList.add('dragging');
       if (e.preventDefault) e.preventDefault();
+    });
+    aiPreviewBody.addEventListener('dblclick', function (e) {
+      if (!e) return;
+      var rect = aiPreviewBody.getBoundingClientRect();
+      var px = e.clientX - rect.left;
+      var py = e.clientY - rect.top;
+      if (aiPreviewMode === 'fit') {
+        setAiPreviewScale(1, px, py);
+      } else {
+        setAiPreviewMode('fit');
+      }
     });
   }
   document.addEventListener('mousemove', function (e) {
     if (!aiPreviewDrag.active || !aiPreviewBody) return;
-    var dx = e.pageX - aiPreviewDrag.startX;
-    var dy = e.pageY - aiPreviewDrag.startY;
-    aiPreviewBody.scrollLeft = aiPreviewDrag.scrollLeft - dx;
-    aiPreviewBody.scrollTop = aiPreviewDrag.scrollTop - dy;
+    var dx = e.clientX - aiPreviewDrag.startX;
+    var dy = e.clientY - aiPreviewDrag.startY;
+    aiPreviewTranslateX = aiPreviewDrag.scrollLeft + dx;
+    aiPreviewTranslateY = aiPreviewDrag.scrollTop + dy;
+    var clamped = clampPreviewTransform(aiPreviewScale, aiPreviewTranslateX, aiPreviewTranslateY);
+    aiPreviewTranslateX = clamped.x;
+    aiPreviewTranslateY = clamped.y;
+    applyPreviewTransform();
   });
   document.addEventListener('mouseup', function () {
     if (!aiPreviewDrag.active) return;
@@ -4590,6 +4901,11 @@
   if (aiHistoryCloseBtn) {
     aiHistoryCloseBtn.addEventListener('click', function () {
       closeAiHistory();
+    });
+  }
+  if (aiHistoryMaxBtn) {
+    aiHistoryMaxBtn.addEventListener('click', function () {
+      setAiHistoryMax();
     });
   }
   if (aiHistoryFixedBtn) {

@@ -262,6 +262,57 @@ function psexCapture_exportActiveLayerToDataUrl() {
     return result;
 }
 
+function psexCapture_exportActiveLayerToFile(outPath) {
+    var doc = null;
+    var all = [];
+    var vis = [];
+    try {
+        if (!outPath) return 'no_path';
+        if (app.documents.length === 0) return 'no_doc';
+        doc = app.activeDocument;
+        var layer = null;
+        try { layer = doc.activeLayer; } catch (e0) { layer = null; }
+        if (!layer) return 'no_layer';
+        function collect(ls) {
+            for (var i = 0; i < ls.length; i++) {
+                var l = ls[i];
+                all.push(l);
+                if (l.typename === 'LayerSet') collect(l.layers);
+            }
+        }
+        collect(doc.layers);
+        var ancestors = [];
+        var p = layer.parent;
+        while (p && p.typename !== 'Document') {
+            ancestors.push(p);
+            p = p.parent;
+        }
+        function isAllowed(l) {
+            if (l === layer) return true;
+            for (var j = 0; j < ancestors.length; j++) {
+                if (l === ancestors[j]) return true;
+            }
+            return false;
+        }
+        for (var i = 0; i < all.length; i++) {
+            try {
+                vis[i] = all[i].visible;
+                all[i].visible = isAllowed(all[i]);
+            } catch (e1) {}
+        }
+        var file = new File(outPath);
+        var opts = new PNGSaveOptions();
+        doc.saveAs(file, opts, true, Extension.LOWERCASE);
+        return 'ok';
+    } catch (e) {
+        return 'error:' + e;
+    } finally {
+        for (var k = 0; k < all.length; k++) {
+            try { all[k].visible = vis[k]; } catch (e2) {}
+        }
+    }
+}
+
 function psexCapture_parseDataUrl(dataUrl) {
     var match = dataUrl.match(/^data:([^;,]+)(;charset=[^;,]+)?(;base64)?,(.*)$/i);
     if (!match) return null;

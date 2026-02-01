@@ -1687,35 +1687,60 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   background: rgba(0, 0, 0, 0.55);
 }
 
-.ai-history-card {
-  position: relative;
-  width: min(980px, 94vw);
-  height: min(760px, 90vh);
+  .ai-history-card {
+    position: relative;
+    width: min(980px, 94vw);
+    height: min(760px, 90vh);
   background: #1b1b1b;
   border: 1px solid #2b2b2b;
   border-radius: 14px;
   z-index: 1;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
+    overflow: hidden;
+  }
 
-.ai-history-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid #242424;
-  font-size: 14px;
-}
+  .ai-history-card.is-max {
+    width: 96vw;
+    height: 94vh;
+  }
 
-.ai-history-close {
-  background: transparent;
-  border: 0;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 18px;
-}
+  .ai-history-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid #242424;
+    font-size: 14px;
+  }
+
+  .ai-history-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ai-history-max {
+    border: 1px solid #2c2c2c;
+    background: #2a2a2a;
+    color: #d7dbe2;
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .ai-history-max:hover {
+    border-color: #3a3a3a;
+  }
+
+  .ai-history-close {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 18px;
+  }
 
 .ai-history-close:hover {
   color: var(--accent);
@@ -1775,6 +1800,7 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 }
 
 .ai-history-thumb {
+  position: relative;
   width: 100%;
   aspect-ratio: var(--thumb-ratio, 1 / 1);
   border-radius: 8px;
@@ -1783,6 +1809,7 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  position: relative;
   color: var(--muted);
   font-size: 12px;
 }
@@ -1812,14 +1839,33 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 }
 
 .ai-history-actions button {
-  flex: 1;
+  flex: 0 0 auto;
+  min-width: 56px;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 6px;
 }
 
-.ai-history-tip {
+.ai-history-info-btn {
   position: absolute;
-  left: 6px;
+  top: 6px;
   right: 6px;
-  bottom: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.4);
+  color: #eaeaea;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-history-prompt {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  max-height: 65%;
   background: rgba(0, 0, 0, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -1828,17 +1874,54 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   font-size: 11px;
   display: none;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
-.ai-history-item:hover .ai-history-tip {
+.ai-history-item.show-prompt .ai-history-prompt {
   display: flex;
 }
 
-.ai-history-tip button {
-  align-self: flex-end;
-  font-size: 10px;
-  padding: 2px 6px;
+.ai-history-prompt-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.ai-history-prompt-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+.ai-history-prompt-text {
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.ai-history-polish {
+  display: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 6px;
+  gap: 6px;
+  flex-direction: column;
+}
+
+.ai-history-polish.open {
+  display: flex;
+}
+
+.ai-history-polish-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ai-history-polish-row select {
+  flex: 1;
+  min-width: 0;
 }
 
 .ai-history-text {
@@ -1932,10 +2015,8 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 .ai-preview-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
+  position: relative;
   background: #121212;
 }
 
@@ -1948,14 +2029,15 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 }
 
 .ai-preview-body img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-
-.ai-preview.open.preview-100 .ai-preview-body img {
+  position: absolute;
+  top: 0;
+  left: 0;
   max-width: none;
   max-height: none;
+  object-fit: contain;
+  transform-origin: 0 0;
+  user-select: none;
+  will-change: transform;
 }
 
 .ai-card {

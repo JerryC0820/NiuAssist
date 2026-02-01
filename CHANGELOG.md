@@ -34,3 +34,10 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - History close (X/backdrop/ESC).
 - History thumbnails no longer crop tall images (contain).
+
+## [1.0.4] - 2026-02-01
+### Updated
+- History cards now include prompt panel (copy + polish entry) and a “打开” button to locate local files.
+- Preview supports zoom/pan and maximization for large windows.
+- History window can maximize/restore and follows panel resizing.
+- Img2img export uses active-layer file export (no extra PS document).

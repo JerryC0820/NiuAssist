@@ -803,6 +803,7 @@ body:not(.mode-ai) .ai-panel {
   min-height: 0;
   max-height: none;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -927,6 +928,10 @@ body:not(.mode-ai) .ai-panel {
   min-width: 0;
 }
 
+.ai-type-row .ai-feature-picker {
+  width: 100%;
+}
+
 .ai-dropdown-toggle {
   width: 100%;
   display: flex;
@@ -947,10 +952,7 @@ body:not(.mode-ai) .ai-panel {
 }
 
 .ai-dropdown-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
+  position: static;
   background: #1a1a1a;
   border: 1px solid #2a2a2a;
   border-radius: 12px;
@@ -959,16 +961,29 @@ body:not(.mode-ai) .ai-panel {
   z-index: 40;
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
   flex-direction: column;
+  width: 100%;
 }
 
 .ai-dropdown.open .ai-dropdown-panel {
   display: flex;
+  margin-top: 8px;
 }
 
 .ai-feature-panel {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  right: 0;
+  margin-top: 0;
   border-radius: 16px;
   padding: 14px;
   z-index: 60;
+  max-height: 70vh;
+  box-sizing: border-box;
+}
+
+.ai-dropdown.open .ai-feature-panel {
+  margin-top: 0;
 }
 
 
@@ -997,6 +1012,7 @@ body:not(.mode-ai) .ai-panel {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: inline-block;
 }
 
 .ai-feature-badge {
@@ -1014,8 +1030,10 @@ body:not(.mode-ai) .ai-panel {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-x: hidden;
   margin-top: 10px;
   padding-right: 4px;
+  box-sizing: border-box;
 }
 
 .ai-feature-empty {
@@ -1038,10 +1056,20 @@ body:not(.mode-ai) .ai-panel {
 
 .ai-feature-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
-  gap: 8px 10px;
+  --feature-tile: 68px;
+  grid-template-columns: repeat(auto-fill, minmax(var(--feature-tile), 1fr));
+  gap: 10px 12px;
+  justify-content: start;
   justify-items: center;
-  --feature-tile: 64px;
+  width: 100%;
+}
+
+body.narrow-ui .ai-feature-grid {
+  --feature-tile: 56px;
+}
+
+body.narrow-ui .ai-feature-item .ai-feature-item-icon {
+  font-size: 38px;
 }
 
 .ai-feature-item {
@@ -1056,7 +1084,8 @@ body:not(.mode-ai) .ai-panel {
   font-size: 12px;
   color: #e8e8e8;
   text-align: center;
-  width: var(--feature-tile);
+  width: 100%;
+  max-width: var(--feature-tile);
 }
 
 .ai-feature-item:hover {
@@ -1068,18 +1097,22 @@ body:not(.mode-ai) .ai-panel {
 }
 
 .ai-feature-item .ai-feature-item-icon {
-  font-size: 30px;
+  font-size: 50px;
+  line-height: 1;
 }
 
 .ai-feature-icon-box {
-  width: var(--feature-tile);
-  height: var(--feature-tile);
+  width: 100%;
+  height: 0;
+  padding-top: 100%;
   border-radius: 12px;
   border: 1px solid #2a2a2a;
   background: #141414;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  box-sizing: border-box;
 }
 
 .ai-feature-item:hover .ai-feature-icon-box {
@@ -1095,9 +1128,20 @@ body:not(.mode-ai) .ai-panel {
   font-size: 11px;
   line-height: 1.2;
   max-width: 100%;
-  white-space: nowrap;
+  text-align: center;
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-height: 26px;
+}
+
+.ai-feature-item-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .ai-feature-item .ai-feature-item-badge {
@@ -1364,7 +1408,7 @@ body:not(.mode-ai) .ai-panel {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 180px;
+  min-height: 280px;
   overflow: hidden;
 }
 
@@ -1425,6 +1469,32 @@ body:not(.mode-ai) .ai-panel {
   justify-content: center;
 }
 
+.ai-result-tip {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px;
+  color: #eaeaea;
+  font-size: 11px;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-result-item:hover .ai-result-tip {
+  display: flex;
+}
+
+.ai-result-tip button {
+  align-self: flex-end;
+  font-size: 10px;
+  padding: 2px 6px;
+}
+
 .ai-result-thumb {
   width: 100%;
   aspect-ratio: 1 / 1;
@@ -1480,6 +1550,162 @@ body:not(.mode-ai) .ai-panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.ai-history {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-history.open {
+  display: flex;
+}
+
+.ai-history-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.ai-history-card {
+  position: relative;
+  width: min(980px, 94vw);
+  height: min(760px, 90vh);
+  background: #1b1b1b;
+  border: 1px solid #2b2b2b;
+  border-radius: 14px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ai-history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #242424;
+  font-size: 14px;
+}
+
+.ai-history-close {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.ai-history-close:hover {
+  color: var(--accent);
+}
+
+.ai-history-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #242424;
+}
+
+.ai-history-tabs button {
+  background: #232323;
+  border: 1px solid #2b2b2b;
+  color: #e0e0e0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.ai-history-tabs button.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.ai-history-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ai-history-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.ai-history-item {
+  background: #191919;
+  border: 1px solid #242424;
+  border-radius: 10px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai-history-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #2a2a2a;
+}
+
+.ai-history-meta {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-history-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ai-history-actions button {
+  flex: 1;
+}
+
+.ai-history-text {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-history-text-card {
+  background: #191919;
+  border: 1px solid #242424;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-history-text-card pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: #e0e0e0;
 }
 
 .ai-preview-toolbar {
@@ -1582,6 +1808,7 @@ body.ai-type-embedding-mm #aiGenerateBtn {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   align-content: start;
+  align-items: stretch;
   margin-bottom: 10px;
   background: #171717;
   border: 1px solid #232323;
@@ -1593,6 +1820,8 @@ body.ai-type-embedding-mm #aiGenerateBtn {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 0;
+  flex: 1 1 0;
 }
 
 .ai-text-insert-row {
@@ -1603,10 +1832,18 @@ body.ai-type-embedding-mm #aiGenerateBtn {
   width: 100%;
 }
 
+body.ai-type-text .ai-text-insert {
+  display: block;
+}
+
 @media (max-width: 520px) {
   .ai-text-grid {
     grid-template-columns: 1fr;
   }
+}
+
+body.narrow-ui .ai-text-grid {
+  grid-template-columns: 1fr;
 }
 
 .ai-text-grid label {
@@ -1627,7 +1864,36 @@ body.ai-type-embedding-mm #aiGenerateBtn {
 }
 
 body.ai-type-text .ai-text-grid textarea {
-  min-height: 150px;
+  min-height: 200px;
+  flex: 1 1 auto;
+}
+
+body.ai-type-text .ai-text-grid {
+  flex: 0 0 auto;
+  min-height: 0;
+  align-content: start;
+}
+
+body.ai-type-text .ai-text-insert-row {
+  margin-top: auto;
+}
+
+.ai-text-actions {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+body.ai-type-text .ai-text-actions {
+  display: flex;
+  margin-top: auto;
+}
+
+body.ai-type-text .ai-config-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
 }
 
 .ai-text-grid textarea::-webkit-scrollbar {

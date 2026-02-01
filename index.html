@@ -96,7 +96,6 @@
             <button id="aiTypeToggle" class="ai-dropdown-toggle ai-feature-toggle" type="button">
               <span id="aiTypeIcon" class="ai-feature-icon">🖼️</span>
               <span id="aiTypeLabel" class="ai-feature-name">图像生成</span>
-              <span id="aiTypeBadge" class="ai-feature-badge">V1</span>
               <span class="ai-dropdown-caret">▾</span>
             </button>
             <div id="aiTypePanel" class="ai-dropdown-panel ai-feature-panel">
@@ -165,7 +164,7 @@
         <div class="ai-row inline ai-image-only">
           <label>插入加速</label>
           <input id="aiPythonSpeed" type="checkbox" class="ai-toggle">
-          <span class="ai-inline-text">Python压缩</span>
+          <span class="ai-inline-text">压缩</span>
           <span class="ai-inline-text">最大边</span>
           <input id="aiPythonMaxSide" type="number" min="800" max="8000" value="2000">
           <span class="ai-inline-text">质量</span>
@@ -196,10 +195,10 @@
           </div>
           <div class="ai-col">
             <label>输出内容</label>
-            <textarea id="aiTextOutput" rows="6" readonly></textarea>
+            <textarea id="aiTextOutput" rows="6" readonly placeholder="生成结果将在这里显示"></textarea>
           </div>
         </div>
-        <div class="ai-row ai-text-only ai-text-insert-row">
+        <div class="ai-text-actions ai-text-only">
           <button id="aiTextInsert" class="ai-text-insert">插入PS文本层</button>
         </div>
       </div>
@@ -226,6 +225,23 @@
       </div>
       <div class="ai-preview-body">
         <img id="aiPreviewImg" alt="预览">
+      </div>
+    </div>
+  </div>
+  <div id="aiHistory" class="ai-history">
+    <div class="ai-history-backdrop"></div>
+    <div class="ai-history-card">
+      <div class="ai-history-toolbar">
+        <span class="ai-history-title">历史记录</span>
+        <button id="aiHistoryClose" class="ai-history-close">×</button>
+      </div>
+      <div id="aiHistoryTabs" class="ai-history-tabs">
+        <button type="button" data-tab="image" class="active">图片</button>
+        <button type="button" data-tab="text">文本</button>
+      </div>
+      <div class="ai-history-body">
+        <div id="aiHistoryImages" class="ai-history-grid"></div>
+        <div id="aiHistoryTexts" class="ai-history-text hidden"></div>
       </div>
     </div>
   </div>

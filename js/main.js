@@ -102,12 +102,12 @@
     { id: 'doubao-embedding-vision-250328', name: '向量-多模态 250328', type: 'embedding-mm', tier: 'standard' }
   ];
   var AI_FEATURES = [
-    { id: 'image', type: 'image', name: '图像生成', category: '图像生成', icon: '🖼️', badge: 'V1' },
-    { id: 'video', type: 'video', name: '视频生成', category: '视频生成', icon: '🎬', badge: 'V1' },
-    { id: 'text', type: 'text', name: '文本助手', category: '文本', icon: '✍️', badge: 'V1' },
-    { id: '3d', type: '3d', name: '3D 模型', category: '3D', icon: '🧊', badge: 'V1' },
-    { id: 'embedding', type: 'embedding', name: '文本向量', category: '向量', icon: '🔎', badge: 'V1' },
-    { id: 'embedding-mm', type: 'embedding-mm', name: '多模态向量', category: '向量', icon: '🌈', badge: 'V1' }
+    { id: 'image', type: 'image', name: '图像生成', category: '图像生成', icon: '🖼️' },
+    { id: 'video', type: 'video', name: '视频生成', category: '视频生成', icon: '🎬' },
+    { id: 'text', type: 'text', name: '文本助手', category: '文本', icon: '✍️' },
+    { id: '3d', type: '3d', name: '3D 模型', category: '3D', icon: '🧊' },
+    { id: 'embedding', type: 'embedding', name: '文本向量', category: '向量', icon: '🔎' },
+    { id: 'embedding-mm', type: 'embedding-mm', name: '多模态向量', category: '向量', icon: '🌈' }
   ];
   var AI_DEFAULTS = {
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3/',
@@ -204,6 +204,11 @@
   var aiPreviewCloseBtn = document.getElementById('aiPreviewClose');
   var aiPreviewFitBtn = document.getElementById('aiPreviewFit');
   var aiPreview100Btn = document.getElementById('aiPreview100');
+  var aiHistoryEl = document.getElementById('aiHistory');
+  var aiHistoryCloseBtn = document.getElementById('aiHistoryClose');
+  var aiHistoryTabs = document.getElementById('aiHistoryTabs');
+  var aiHistoryImagesEl = document.getElementById('aiHistoryImages');
+  var aiHistoryTextsEl = document.getElementById('aiHistoryTexts');
   var syncToggle = document.getElementById('syncToggle');
   var syncTimerToggle = document.getElementById('syncTimerToggle');
   var syncIntervalInput = document.getElementById('syncInterval');
@@ -522,6 +527,457 @@
     }
 
     tryNext();
+  }
+
+  var aiCacheQueue = [];
+  var aiCacheBusy = false;
+  var aiCacheDir = '';
+
+  function ensureDirPath(mods, dir) {
+    if (!mods || !mods.fs || !dir) return false;
+    try {
+      if (!mods.fs.existsSync(dir)) {
+        mods.fs.mkdirSync(dir, { recursive: true });
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function getAiCacheDir() {
+    if (aiCacheDir) return aiCacheDir;
+    var mods = getNodeModules();
+    if (!mods) return '';
+    var dir = '';
+    try {
+      dir = mods.path.join(extPath, 'cache', 'images');
+    } catch (e) {
+      dir = '';
+    }
+    if (!dir) return '';
+    if (!ensureDirPath(mods, dir)) return '';
+    aiCacheDir = dir;
+    return aiCacheDir;
+  }
+
+  function extractExtFromUrl(url, fallback) {
+    var def = fallback || 'png';
+    if (!url) return def;
+    if (url.indexOf('data:') === 0) {
+      var mime = url.slice(5, url.indexOf(';')) || '';
+      if (mime.indexOf('jpeg') !== -1 || mime.indexOf('jpg') !== -1) return 'jpg';
+      if (mime.indexOf('webp') !== -1) return 'webp';
+      if (mime.indexOf('png') !== -1) return 'png';
+      return def;
+    }
+    var clean = url.split('?')[0];
+    var match = clean.match(/\.([a-zA-Z0-9]+)$/);
+    if (!match) return def;
+    return match[1].toLowerCase();
+  }
+
+  function dataUrlToUint8(dataUrl) {
+    try {
+      var comma = dataUrl.indexOf(',');
+      if (comma === -1) return null;
+      var base64 = dataUrl.slice(comma + 1);
+      var binary = atob(base64);
+      var len = binary.length;
+      var bytes = new Uint8Array(len);
+      for (var i = 0; i < len; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function downloadUrlToFile(url, outPath, cb) {
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) {
+      if (cb) cb('NodeJS 未启用');
+      return;
+    }
+    if (!url || !outPath) {
+      if (cb) cb('无效路径');
+      return;
+    }
+    if (url.indexOf('data:') === 0) {
+      var bytes = dataUrlToUint8(url);
+      if (!bytes) {
+        if (cb) cb('解析 dataUrl 失败');
+        return;
+      }
+      var payload = (typeof Buffer !== 'undefined') ? Buffer.from(bytes) : bytes;
+      mods.fs.writeFile(outPath, payload, function (err) {
+        if (cb) cb(err ? String(err) : null, outPath);
+      });
+      return;
+    }
+    fetch(url).then(function (res) {
+      return res.arrayBuffer();
+    }).then(function (buf) {
+      var payload = (typeof Buffer !== 'undefined') ? Buffer.from(buf) : buf;
+      mods.fs.writeFile(outPath, payload, function (err) {
+        if (cb) cb(err ? String(err) : null, outPath);
+      });
+    }).catch(function (err) {
+      if (cb) cb(String(err));
+    });
+  }
+
+  function queueAiCache(items, settings) {
+    if (!items || !items.length) return;
+    var dir = getAiCacheDir();
+    if (!dir) return;
+    var now = Date.now();
+    var usePython = !!(settings && settings.aiPythonSpeed);
+    var maxSide = parseInt((settings && settings.aiPythonMaxSide) || 2000, 10);
+    if (isNaN(maxSide) || maxSide < 800) maxSide = 2000;
+    var quality = parseInt((settings && settings.aiPythonQuality) || 80, 10);
+    if (isNaN(quality) || quality < 10) quality = 80;
+    if (quality > 100) quality = 100;
+    var prompt = (aiPromptInput && aiPromptInput.value || '').trim();
+    var modelId = settings ? getSelectedModelId(settings) : '';
+    var size = settings ? resolveImageSize(settings) : '';
+    items.forEach(function (item, idx) {
+      if (!item || !item.url) return;
+      var ext = extractExtFromUrl(item.url, 'png');
+      var baseName = 't2i_' + now + '_' + (idx + 1);
+      var rawPath = dir + '/' + baseName + '.' + ext;
+      var optExt = usePython ? 'jpg' : ext;
+      var optPath = dir + '/' + baseName + '_opt.' + optExt;
+      aiCacheQueue.push({
+        item: item,
+        url: item.url,
+        rawPath: rawPath,
+        optPath: optPath,
+        usePython: usePython,
+        maxSide: maxSide,
+        quality: quality,
+        isData: item.url.indexOf('data:') === 0,
+        meta: {
+          id: 'img_' + now + '_' + (idx + 1),
+          createdAt: now,
+          model: modelId,
+          size: size,
+          prompt: prompt
+        }
+      });
+    });
+    processAiCacheQueue();
+  }
+
+  function processAiCacheQueue() {
+    if (aiCacheBusy) return;
+    var job = aiCacheQueue.shift();
+    if (!job) return;
+    aiCacheBusy = true;
+    setAiStatus('正在缓存素材...', '');
+    downloadUrlToFile(job.url, job.rawPath, function (err) {
+      if (err) {
+        setAiStatus('缓存失败：' + err, 'warn');
+        aiCacheBusy = false;
+        setTimeout(processAiCacheQueue, 60);
+        return;
+      }
+      job.item.rawPath = job.rawPath;
+      if (!job.usePython || job.isData) {
+        job.item.localPath = job.rawPath;
+        saveImageHistoryRecord(job);
+        setAiStatus('缓存完成，可快速插入。', 'ok');
+        aiCacheBusy = false;
+        setTimeout(processAiCacheQueue, 60);
+        return;
+      }
+      if (pythonBusy) {
+        aiCacheQueue.unshift(job);
+        aiCacheBusy = false;
+        setTimeout(processAiCacheQueue, 200);
+        return;
+      }
+      pythonBusy = true;
+      setAiStatus('压缩处理中…', '');
+      runPythonTranscode(job.url, { referer: '', title: '' }, function (err2, outPath) {
+        pythonBusy = false;
+        if (err2 || !outPath) {
+          job.item.localPath = job.rawPath;
+          setAiStatus('压缩失败，使用原图缓存。', 'warn');
+        } else {
+          var mods = getNodeModules();
+          if (mods && mods.fs) {
+            try {
+              mods.fs.copyFileSync(outPath, job.optPath);
+              job.item.localPath = job.optPath;
+            } catch (e) {
+              job.item.localPath = outPath;
+            }
+          } else {
+            job.item.localPath = outPath;
+          }
+          saveImageHistoryRecord(job);
+          setAiStatus('压缩完成，可快速插入。', 'ok');
+        }
+        aiCacheBusy = false;
+        setTimeout(processAiCacheQueue, 60);
+      }, { maxSide: job.maxSide, format: 'jpeg', quality: job.quality });
+    });
+  }
+
+  var aiHistoryIndexPath = '';
+
+  function getAiCacheMetaDir() {
+    var mods = getNodeModules();
+    if (!mods) return '';
+    var dir = '';
+    try {
+      dir = mods.path.join(extPath, 'cache', 'meta');
+    } catch (e) {
+      dir = '';
+    }
+    if (!dir) return '';
+    if (!ensureDirPath(mods, dir)) return '';
+    return dir;
+  }
+
+  function getAiCacheTextDir() {
+    var mods = getNodeModules();
+    if (!mods) return '';
+    var dir = '';
+    try {
+      dir = mods.path.join(extPath, 'cache', 'text');
+    } catch (e) {
+      dir = '';
+    }
+    if (!dir) return '';
+    if (!ensureDirPath(mods, dir)) return '';
+    return dir;
+  }
+
+  function getAiHistoryIndexPath() {
+    if (aiHistoryIndexPath) return aiHistoryIndexPath;
+    var mods = getNodeModules();
+    if (!mods) return '';
+    var metaDir = getAiCacheMetaDir();
+    if (!metaDir) return '';
+    aiHistoryIndexPath = mods.path.join(metaDir, 'index.jsonl');
+    return aiHistoryIndexPath;
+  }
+
+  function formatFileUrl(filePath) {
+    if (!filePath) return '';
+    var path = String(filePath).replace(/\\/g, '/');
+    if (path.indexOf('file:///') === 0) return path;
+    return 'file:///' + path;
+  }
+
+  function appendHistoryLine(record) {
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) return;
+    var indexPath = getAiHistoryIndexPath();
+    if (!indexPath) return;
+    try {
+      var line = JSON.stringify(record) + '\n';
+      mods.fs.appendFileSync(indexPath, line, 'utf8');
+    } catch (e) {}
+  }
+
+  function saveImageHistoryRecord(job) {
+    if (!job || !job.item) return;
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) return;
+    var metaDir = getAiCacheMetaDir();
+    if (!metaDir) return;
+    var id = job.meta && job.meta.id ? job.meta.id : ('img_' + Date.now() + '_' + Math.floor(Math.random() * 10000));
+    var record = {
+      id: id,
+      type: 'image',
+      createdAt: job.meta && job.meta.createdAt ? job.meta.createdAt : Date.now(),
+      model: job.meta && job.meta.model ? job.meta.model : '',
+      size: job.meta && job.meta.size ? job.meta.size : '',
+      prompt: job.meta && job.meta.prompt ? job.meta.prompt : '',
+      url: job.url || '',
+      rawPath: job.item.rawPath || job.rawPath || '',
+      localPath: job.item.localPath || '',
+      insertPath: job.item.localPath || job.item.rawPath || ''
+    };
+    var metaPath = '';
+    try {
+      metaPath = mods.path.join(metaDir, id + '.json');
+      mods.fs.writeFileSync(metaPath, JSON.stringify(record, null, 2), 'utf8');
+    } catch (e) {}
+    appendHistoryLine(record);
+  }
+
+  function saveTextHistoryRecord(payload, result) {
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) return;
+    var metaDir = getAiCacheMetaDir();
+    if (!metaDir) return;
+    var id = 'text_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+    var record = {
+      id: id,
+      type: 'text',
+      createdAt: Date.now(),
+      model: payload && payload.model ? payload.model : '',
+      task: payload && payload.task ? payload.task : '',
+      prompt: payload && payload.prompt ? payload.prompt : '',
+      input: payload && payload.input ? payload.input : '',
+      output: result || ''
+    };
+    var metaPath = '';
+    try {
+      metaPath = mods.path.join(metaDir, id + '.json');
+      mods.fs.writeFileSync(metaPath, JSON.stringify(record, null, 2), 'utf8');
+    } catch (e) {}
+    appendHistoryLine(record);
+  }
+
+  function readHistoryRecords() {
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) return [];
+    var indexPath = getAiHistoryIndexPath();
+    if (!indexPath || !mods.fs.existsSync(indexPath)) return [];
+    try {
+      var text = mods.fs.readFileSync(indexPath, 'utf8');
+      var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+      var items = lines.map(function (line) {
+        try { return JSON.parse(line); } catch (e) { return null; }
+      }).filter(Boolean);
+      return items.reverse();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function renderHistoryImages(records) {
+    if (!aiHistoryImagesEl) return;
+    aiHistoryImagesEl.innerHTML = '';
+    if (!records.length) {
+      aiHistoryImagesEl.innerHTML = '<div class="ai-text">暂无图片历史</div>';
+      return;
+    }
+    records.forEach(function (rec) {
+      var card = document.createElement('div');
+      card.className = 'ai-history-item';
+      var img = document.createElement('img');
+      img.className = 'ai-history-thumb';
+      var showUrl = rec.localPath ? formatFileUrl(rec.localPath) : (rec.url || '');
+      img.src = showUrl;
+      card.appendChild(img);
+      var meta = document.createElement('div');
+      meta.className = 'ai-history-meta';
+      meta.textContent = rec.model || rec.size || '历史记录';
+      card.appendChild(meta);
+      var actions = document.createElement('div');
+      actions.className = 'ai-history-actions';
+      var insertBtn = document.createElement('button');
+      insertBtn.textContent = '导入图层';
+      insertBtn.addEventListener('click', function () {
+        var item = { url: rec.url || showUrl, localPath: rec.insertPath || rec.localPath || '' };
+        insertAiImageUrl(item, (aiState && aiState.imageInsertMode === 'replace') ? 'replace' : 'insert');
+      });
+      actions.appendChild(insertBtn);
+      var previewBtn = document.createElement('button');
+      previewBtn.textContent = '预览';
+      previewBtn.addEventListener('click', function () {
+        openAiPreview({ url: showUrl });
+      });
+      actions.appendChild(previewBtn);
+      card.appendChild(actions);
+      aiHistoryImagesEl.appendChild(card);
+    });
+  }
+
+  function renderHistoryTexts(records) {
+    if (!aiHistoryTextsEl) return;
+    aiHistoryTextsEl.innerHTML = '';
+    if (!records.length) {
+      aiHistoryTextsEl.innerHTML = '<div class="ai-text">暂无文本历史</div>';
+      return;
+    }
+    records.forEach(function (rec) {
+      var card = document.createElement('div');
+      card.className = 'ai-history-text-card';
+      var title = document.createElement('div');
+      title.className = 'ai-history-meta';
+      title.textContent = (rec.task || '文本记录') + ' - ' + (rec.model || '');
+      card.appendChild(title);
+      var input = document.createElement('pre');
+      input.textContent = rec.input || '';
+      card.appendChild(input);
+      var output = document.createElement('pre');
+      output.textContent = rec.output || '';
+      card.appendChild(output);
+      var actions = document.createElement('div');
+      actions.className = 'ai-history-actions';
+      var copyBtn = document.createElement('button');
+      copyBtn.textContent = '复制输出';
+      copyBtn.addEventListener('click', function () {
+        copyToClipboard(rec.output || '');
+      });
+      actions.appendChild(copyBtn);
+      var insertBtn = document.createElement('button');
+      insertBtn.textContent = '插入文本层';
+      insertBtn.addEventListener('click', function () {
+        insertTextToPs(rec.output || '');
+      });
+      actions.appendChild(insertBtn);
+      card.appendChild(actions);
+      aiHistoryTextsEl.appendChild(card);
+    });
+  }
+
+  function setHistoryTab(tab) {
+    var t = tab === 'text' ? 'text' : 'image';
+    if (aiHistoryTabs) {
+      var btns = aiHistoryTabs.querySelectorAll('button');
+      Array.prototype.forEach.call(btns, function (btn) {
+        btn.classList.toggle('active', btn.getAttribute('data-tab') === t);
+      });
+    }
+    if (aiHistoryImagesEl) aiHistoryImagesEl.classList.toggle('hidden', t !== 'image');
+    if (aiHistoryTextsEl) aiHistoryTextsEl.classList.toggle('hidden', t !== 'text');
+  }
+
+  function openAiHistory(tab) {
+    if (!aiHistoryEl) return;
+    var all = readHistoryRecords();
+    var images = all.filter(function (it) { return it.type === 'image'; });
+    var texts = all.filter(function (it) { return it.type === 'text'; });
+    renderHistoryImages(images);
+    renderHistoryTexts(texts);
+    setHistoryTab(tab || 'image');
+    aiHistoryEl.classList.add('open');
+  }
+
+  function closeAiHistory() {
+    if (!aiHistoryEl) return;
+    aiHistoryEl.classList.remove('open');
+  }
+
+  function copyToClipboard(text) {
+    var value = text || '';
+    if (!value) return;
+    try {
+      if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value);
+        return;
+      }
+    } catch (e) {}
+    try {
+      var area = document.createElement('textarea');
+      area.value = value;
+      area.style.position = 'fixed';
+      area.style.left = '-9999px';
+      document.body.appendChild(area);
+      area.focus();
+      area.select();
+      document.execCommand('copy');
+      document.body.removeChild(area);
+    } catch (e2) {}
   }
 
   function placeFileByPath(path, info) {
@@ -1496,14 +1952,11 @@
   }
 
   function updateFeatureToggle() {
-    if (!aiTypeLabel || !aiTypeIcon || !aiTypeBadge) return;
+    if (!aiTypeLabel || !aiTypeIcon) return;
     var feature = getFeatureByType(aiState ? aiState.type : 'image');
     aiTypeLabel.textContent = feature.name || '图像生成';
     aiTypeIcon.textContent = feature.icon || '🖼️';
-    if (feature.badge) {
-      aiTypeBadge.textContent = '';
-      aiTypeBadge.style.display = 'none';
-    } else {
+    if (aiTypeBadge) {
       aiTypeBadge.textContent = '';
       aiTypeBadge.style.display = 'none';
     }
@@ -1577,12 +2030,14 @@
     if (!aiTypeDropdown) return;
     aiTypeDropdown.classList.add('open');
     updateLayoutMode();
-    positionFeaturePanel();
     if (aiTypeSearch) {
       aiTypeSearch.value = '';
       aiTypeSearch.focus();
     }
     renderFeatureList('');
+    requestAnimationFrame(function () {
+      positionFeaturePanel();
+    });
   }
 
   function closeFeaturePicker() {
@@ -1618,32 +2073,29 @@
 
   function positionFeaturePanel() {
     if (!aiTypePanel || !aiPanel) return;
-    if (document.body.classList.contains('narrow-ui')) {
-      resetFeaturePanelPosition();
-      return;
-    }
-    var panelRect = aiPanel.getBoundingClientRect();
-    var toggleRect = aiTypeToggle ? aiTypeToggle.getBoundingClientRect() : panelRect;
-    var footerHeight = 80;
-    var top = toggleRect.bottom + 10;
-    var maxBottom = panelRect.bottom - footerHeight;
-    var height = Math.max(220, maxBottom - top);
-    if (height < 220) {
-      top = panelRect.top + 120;
-      height = Math.max(220, panelRect.bottom - footerHeight - top);
-    }
-    aiTypePanel.style.position = 'fixed';
-    aiTypePanel.style.left = (panelRect.left + 16) + 'px';
-    aiTypePanel.style.top = top + 'px';
-    aiTypePanel.style.width = (panelRect.width - 32) + 'px';
-    aiTypePanel.style.maxHeight = height + 'px';
-    aiTypePanel.style.height = height + 'px';
+    resetFeaturePanelPosition();
+    try {
+      var footer = aiPanel.querySelector('.ai-footer');
+      if (!footer) return;
+      var panelRect = aiTypePanel.getBoundingClientRect();
+      var footerRect = footer.getBoundingClientRect();
+      var available = footerRect.top - panelRect.top - 12;
+      if (available < 200) available = 200;
+      aiTypePanel.style.maxHeight = available + 'px';
+    } catch (e) {}
   }
 
   function updateLayoutMode() {
-    if (document.body.classList.contains('narrow-ui')) {
-      document.body.classList.remove('narrow-ui');
+    var narrow = false;
+    var winW = window.innerWidth || 0;
+    if (winW && winW < 520) narrow = true;
+    if (aiPanel && aiPanel.classList.contains('open')) {
+      try {
+        var rect = aiPanel.getBoundingClientRect();
+        if (rect && rect.width && rect.width < 460) narrow = true;
+      } catch (e) {}
     }
+    document.body.classList.toggle('narrow-ui', narrow);
   }
 
   function cacheFeatureParams(type) {
@@ -2082,7 +2534,15 @@
     return found || aiGeneratedImages[0] || null;
   }
 
-  function insertAiImageUrl(url, insertMode, cb) {
+  function insertAiImageUrl(input, insertMode, cb) {
+    var item = (input && typeof input === 'object') ? input : { url: input };
+    var url = item ? item.url : '';
+    var localPath = item && item.localPath ? item.localPath : '';
+    if (localPath) {
+      placeFileByPath(localPath, { scaled: false, jpeg: false });
+      if (cb) cb(true);
+      return;
+    }
     var isHttp = url && url.indexOf('http') === 0;
     var canPython = !!(pythonState && pythonState.enabled) && isHttp;
     var pySpeed = !!(aiState && aiState.aiPythonSpeed);
@@ -2154,7 +2614,7 @@
     var i = idx || 0;
     if (i >= items.length) return;
     var item = items[i];
-    insertAiImageUrl(item.url, insertMode, function () {
+    insertAiImageUrl(item, insertMode, function () {
       setTimeout(function () {
         insertAiImagesSequential(items, insertMode, i + 1);
       }, 120);
@@ -2176,11 +2636,13 @@
       return;
     }
     if (type === 'image') {
+      var promptText = (aiPromptInput && aiPromptInput.value || '').trim();
       aiGeneratedImages = items.map(function (it, idx) {
         return {
           id: it.id || ('ai_' + Date.now() + '_' + idx),
           url: it.url,
-          label: it.label || it.url || ('图片' + (idx + 1))
+          label: it.label || it.url || ('图片' + (idx + 1)),
+          prompt: promptText
         };
       });
       aiSelectedId = aiGeneratedImages[0] ? aiGeneratedImages[0].id : null;
@@ -2194,7 +2656,7 @@
       insertBtn.addEventListener('click', function () {
         var item = getSelectedAiItem();
         if (!item) return;
-        insertAiImageUrl(item.url, insertMode);
+        insertAiImageUrl(item, insertMode);
       });
       actionBar.appendChild(insertBtn);
 
@@ -2215,6 +2677,13 @@
       });
       actionBar.appendChild(previewBtn);
 
+      var historyBtn = document.createElement('button');
+      historyBtn.textContent = '历史';
+      historyBtn.addEventListener('click', function () {
+        openAiHistory('image');
+      });
+      actionBar.appendChild(historyBtn);
+
       aiResultEl.appendChild(actionBar);
 
       var grid = document.createElement('div');
@@ -2233,6 +2702,22 @@
         meta.className = 'ai-result-meta';
         meta.textContent = item.label;
         card.appendChild(meta);
+
+        if (item.prompt) {
+          var tip = document.createElement('div');
+          tip.className = 'ai-result-tip';
+          var tipText = document.createElement('div');
+          tipText.textContent = item.prompt;
+          tip.appendChild(tipText);
+          var copyBtn = document.createElement('button');
+          copyBtn.textContent = '复制提示词';
+          copyBtn.addEventListener('click', function (ev) {
+            if (ev && ev.stopPropagation) ev.stopPropagation();
+            copyToClipboard(item.prompt);
+          });
+          tip.appendChild(copyBtn);
+          card.appendChild(tip);
+        }
 
         card.addEventListener('click', function () {
           selectAiImage(item.id);
@@ -2369,6 +2854,46 @@
     } catch (e) {}
   }
 
+  function fetchExtraImages(baseUrl, settings, payload, remaining, cb) {
+    var results = [];
+    var left = remaining || 0;
+    if (left <= 0) {
+      if (cb) cb(results);
+      return;
+    }
+    function next() {
+      if (left <= 0) {
+        if (cb) cb(results);
+        return;
+      }
+      var single = {};
+      Object.keys(payload || {}).forEach(function (k) { single[k] = payload[k]; });
+      single.n = 1;
+      single.num_images = 1;
+      single.batch_size = 1;
+      single.image_count = 1;
+      fetchJsonWithStatus(baseUrl + 'images/generations', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + settings.apiKey
+        },
+        body: JSON.stringify(single)
+      }, function (res) {
+        if (res.ok) {
+          var json = res.data || {};
+          var items = extractImageResults(json);
+          if (items && items.length) {
+            results.push(items[0]);
+          }
+        }
+        left -= 1;
+        setTimeout(next, 120);
+      });
+    }
+    next();
+  }
+
   function enforceMinPixelsForModel(modelId, size) {
     var id = (modelId || '').toLowerCase();
     if (id.indexOf('seedream-4-5') === -1) return size;
@@ -2465,7 +2990,24 @@
         setAiStatus('生成失败：未返回结果。', 'err');
         return;
       }
+      if (count > 1 && items.length < count) {
+        var missing = count - items.length;
+        setAiStatus('接口返回 ' + items.length + ' 张，正在补齐…', 'warn');
+        fetchExtraImages(baseUrl, settings, payload, missing, function (extra) {
+          var merged = items.concat(extra || []);
+          renderAiResult(merged, 'image');
+          queueAiCache(aiGeneratedImages, aiState);
+          if (sizeNote) {
+            setAiStatus('生成完成（' + sizeNote + '）。', 'ok');
+          } else {
+            setAiStatus('生成完成。', 'ok');
+          }
+          checkReturnedImageSize(merged, originalSize || size);
+        });
+        return;
+      }
       renderAiResult(items, 'image');
+      queueAiCache(aiGeneratedImages, aiState);
       if (sizeNote) {
         setAiStatus('生成完成（' + sizeNote + '）。', 'ok');
       } else {

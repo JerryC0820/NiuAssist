@@ -19,3 +19,9 @@ All notable changes to this project will be documented in this file.
 - Bookmark panel positioning improved for narrow windows.
 ### Fixed
 - Context menu now remains accessible even when capture mode is off (insert is disabled until enabled).
+
+## [1.0.2] - 2026-02-01
+### Updated
+- Feature picker tiles tightened to smaller squares with larger icons; V1/V2 badges removed.
+- Feature panel now overlays without horizontal scrolling, and avoids covering the “立即生成” button.
+- Text assistant layout adjusted: inputs taller, insert button sits above generate in text mode.

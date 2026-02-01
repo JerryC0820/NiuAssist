@@ -45,12 +45,12 @@
               <Height>1100</Height>
             </Size>
             <MinSize>
-              <Width>520</Width>
-              <Height>900</Height>
+              <Width>320</Width>
+              <Height>600</Height>
             </MinSize>
             <MaxSize>
-              <Width>1400</Width>
-              <Height>2000</Height>
+              <Width>8000</Width>
+              <Height>4000</Height>
             </MaxSize>
           </Geometry>
           <Icons>

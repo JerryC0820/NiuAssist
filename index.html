@@ -46,6 +46,19 @@
       <button id="injectBtn" class="capture-only" title="注入采集脚本">注入</button>
     </div>
   </div>
+  <div id="captureMenu" class="capture-menu">
+    <button class="menu-item" data-action="insert">插入到图层</button>
+    <button class="menu-item" data-action="open">新标签打开</button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" data-action="original">纯图模式<span class="menu-check" id="menuCheckOriginal">√</span></button>
+    <button class="menu-item" data-action="capture">插图模式<span class="menu-check" id="menuCheckCapture">√</span></button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" data-action="reload">重新载入</button>
+    <button class="menu-item" data-action="fullscreen">全屏窗口/默认</button>
+    <button class="menu-item" data-action="close">关闭</button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" data-action="about">了解本工具</button>
+  </div>
   <div id="bookmarkPanel" class="bookmark-panel">
     <div class="bookmark-header">
       <span class="bookmark-title">收藏夹</span>
@@ -55,21 +68,45 @@
   </div>
   <div id="aiPanel" class="ai-panel">
     <div class="ai-body">
-      <div class="ai-section">
-        <div class="ai-row">
-          <label>API 密钥</label>
-          <input id="aiKey" type="password" placeholder="sk-xxxx">
+      <div class="ai-section ai-collapsible" id="aiAuthSection">
+        <button id="aiAuthToggle" class="ai-collapse-toggle" type="button">
+          <span class="ai-collapse-left">
+            <span class="ai-collapse-title">豆包火山方舟</span>
+            <span id="aiAuthStatus" class="ai-collapse-dot" title="接口状态"></span>
+            <span id="aiAuthSummary" class="ai-collapse-summary"></span>
+          </span>
+          <span class="ai-collapse-icon">▾</span>
+        </button>
+        <div id="aiAuthBody" class="ai-collapse-body">
+          <div class="ai-row">
+            <label>API 密钥</label>
+            <input id="aiKey" type="password" placeholder="sk-xxxx">
+          </div>
+          <div class="ai-row">
+            <label>火山方舟接口</label>
+            <input id="aiBaseUrl" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3/">
+          </div>
+          <button id="aiSaveBtn" class="ai-save">保存设置</button>
         </div>
-        <div class="ai-row">
-          <label>接口地址</label>
-          <input id="aiBaseUrl" type="text" placeholder="https://ark.cn-beijing.volces.com/api/v3/">
-        </div>
-        <button id="aiSaveBtn" class="ai-save">保存设置</button>
       </div>
-      <div class="ai-section">
-        <div class="ai-row inline">
+      <div class="ai-section ai-config-section">
+        <div class="ai-row ai-type-row">
           <label>功能类型</label>
-          <select id="aiType">
+          <div id="aiTypeDropdown" class="ai-dropdown ai-feature-picker">
+            <button id="aiTypeToggle" class="ai-dropdown-toggle ai-feature-toggle" type="button">
+              <span id="aiTypeIcon" class="ai-feature-icon">🖼️</span>
+              <span id="aiTypeLabel" class="ai-feature-name">图像生成</span>
+              <span id="aiTypeBadge" class="ai-feature-badge">V1</span>
+              <span class="ai-dropdown-caret">▾</span>
+            </button>
+            <div id="aiTypePanel" class="ai-dropdown-panel ai-feature-panel">
+              <div class="ai-dropdown-search">
+                <input id="aiTypeSearch" type="text" placeholder="搜索功能">
+              </div>
+              <div id="aiTypeList" class="ai-feature-list"></div>
+            </div>
+          </div>
+          <select id="aiType" class="ai-hidden-select">
             <option value="image">图像</option>
             <option value="video">视频</option>
             <option value="text">文本</option>
@@ -77,7 +114,9 @@
             <option value="embedding">向量(文本)</option>
             <option value="embedding-mm">向量(多模态)</option>
           </select>
-          <label class="inline-label">精度</label>
+        </div>
+        <div class="ai-row inline ai-tier-row">
+          <label>精度</label>
           <select id="aiTier">
             <option value="lite">轻量</option>
             <option value="pro">专业</option>
@@ -111,7 +150,7 @@
           <select id="aiImageSizeSelect" class="ai-size-select"></select>
           <input id="aiImageSizeCustom" type="text" class="ai-size-custom hidden" placeholder="自定义比例或尺寸">
           <label class="inline-label">数量</label>
-          <input id="aiImageCount" type="number" min="1" max="4" value="1">
+          <input id="aiImageCount" type="number" min="1" max="8" value="1">
         </div>
         <div class="ai-row inline ai-image-only">
           <label>图生图</label>
@@ -122,6 +161,15 @@
             <option value="insert">新图层</option>
             <option value="replace">替换图层</option>
           </select>
+        </div>
+        <div class="ai-row inline ai-image-only">
+          <label>插入加速</label>
+          <input id="aiPythonSpeed" type="checkbox" class="ai-toggle">
+          <span class="ai-inline-text">Python压缩</span>
+          <span class="ai-inline-text">最大边</span>
+          <input id="aiPythonMaxSide" type="number" min="800" max="8000" value="2000">
+          <span class="ai-inline-text">质量</span>
+          <input id="aiPythonQuality" type="number" min="10" max="100" value="80">
         </div>
         <div class="ai-row inline ai-video-only">
           <label>首帧图</label>
@@ -151,16 +199,33 @@
             <textarea id="aiTextOutput" rows="6" readonly></textarea>
           </div>
         </div>
-        <div class="ai-row ai-text-only ai-row-actions">
-          <button id="aiTextGenerate">生成文本</button>
-          <button id="aiTextInsert">插入PS文本层</button>
+        <div class="ai-row ai-text-only ai-text-insert-row">
+          <button id="aiTextInsert" class="ai-text-insert">插入PS文本层</button>
         </div>
-        <button id="aiGenerateBtn" class="ai-generate ai-image-only ai-video-only">立即生成</button>
-        <div id="aiStatus" class="ai-status"></div>
       </div>
-      <div class="ai-section">
+      <div class="ai-section ai-result-section">
         <div class="ai-result-title">结果</div>
         <div id="aiResult" class="ai-result"></div>
+      </div>
+    </div>
+    <div class="ai-footer">
+      <div id="aiStatus" class="ai-status"></div>
+      <button id="aiGenerateBtn" class="ai-generate ai-image-only ai-video-only">立即生成</button>
+    </div>
+  </div>
+  <div id="aiPreview" class="ai-preview">
+    <div class="ai-preview-backdrop"></div>
+    <div class="ai-preview-card">
+      <div class="ai-preview-toolbar">
+        <span id="aiPreviewTitle" class="ai-preview-title">预览</span>
+        <div class="ai-preview-actions">
+          <button id="aiPreviewFit">适应</button>
+          <button id="aiPreview100">100%</button>
+          <button id="aiPreviewClose" class="ai-preview-close">×</button>
+        </div>
+      </div>
+      <div class="ai-preview-body">
+        <img id="aiPreviewImg" alt="预览">
       </div>
     </div>
   </div>
@@ -215,6 +280,12 @@
         <label class="sync-label toggle-label">
           <input id="origToggle" type="checkbox">
           原图模式
+        </label>
+        </div>
+        <div class="compress-controls ctrl-group">
+        <label class="sync-label toggle-label">
+          <input id="viewToggle" type="checkbox">
+          纯图模式
         </label>
         </div>
       </div>

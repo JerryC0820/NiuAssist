@@ -31,16 +31,34 @@
   var JPEG_DEFAULTS = { enabled: false, quality: 85 };
   var PY_DEFAULTS = { enabled: false };
   var ORIG_DEFAULTS = { enabled: false };
-  var AI_IMAGE_SIZES_DEFAULT = [
-    '1:1',
-    '4:3',
-    '3:4',
-    '16:9',
-    '9:16',
-    '2:3',
-    '3:2'
+  var AI_IMAGE_PRESETS = [
+    { ratio: '1:1', orient: '方', sizes: ['2048x2048', '3072x3072', '4096x4096'] },
+    { ratio: '16:9', orient: '横', sizes: ['2560x1440', '3200x1800', '3840x2160'] },
+    { ratio: '9:16', orient: '竖', sizes: ['1440x2560', '1800x3200', '2160x3840'] },
+    { ratio: '4:3', orient: '横', sizes: ['2560x1920', '3200x2400', '4096x3072'] },
+    { ratio: '3:4', orient: '竖', sizes: ['1920x2560', '2400x3200', '3072x4096'] },
+    { ratio: '3:2', orient: '横', sizes: ['2400x1600', '3000x2000', '3600x2400'] },
+    { ratio: '2:3', orient: '竖', sizes: ['1600x2400', '2000x3000', '2400x3600'] }
   ];
+  var AI_IMAGE_LABELS = [];
+  var AI_IMAGE_LABEL_TO_SIZE = {};
+  var AI_IMAGE_SIZE_TO_LABEL = {};
+  var AI_IMAGE_SIZES_DEFAULT = [];
+  AI_IMAGE_PRESETS.forEach(function (preset) {
+    preset.sizes.forEach(function (s) {
+      var label = preset.ratio + ' ' + preset.orient + ' (' + s + ')';
+      AI_IMAGE_LABELS.push(label);
+      AI_IMAGE_LABEL_TO_SIZE[label] = s;
+      if (!AI_IMAGE_SIZE_TO_LABEL[s]) AI_IMAGE_SIZE_TO_LABEL[s] = label;
+      AI_IMAGE_SIZES_DEFAULT.push(s);
+    });
+  });
   var AI_IMAGE_SIZES_LARGE = AI_IMAGE_SIZES_DEFAULT.slice();
+  var AI_SIZE_MIN_PIXELS = 3686400;
+  var AI_SIZE_MAX_PIXELS = 16777216;
+  var AI_SIZE_MAX_W = 4096;
+  var AI_SIZE_MAX_H = 4096;
+  var AI_SIZE_MULTIPLE = 16;
   var AI_MODEL_DEFAULTS = [
     { id: 'doubao-seed-1-8-251228', name: '豆包 Seed 1.8', type: 'text', tier: 'pro' },
     { id: 'glm-4-7-251222', name: 'GLM-4.7', type: 'text', tier: 'pro' },
@@ -114,7 +132,7 @@
     apiKey: '',
     type: 'image',
     tier: 'all',
-    imageSize: '1:1',
+    imageSize: '2048x2048',
     imageSizeMode: 'preset',
     imageCount: 1,
     imageUseLayer: false,
@@ -181,8 +199,9 @@
   var aiModelResetBtn = document.getElementById('aiModelReset');
   var aiModelCustomInput = document.getElementById('aiModelCustom');
   var aiModelCustomRow = aiModelCustomInput ? aiModelCustomInput.parentElement : null;
-  var aiImageSizeSelect = document.getElementById('aiImageSizeSelect');
-  var aiImageSizeCustomInput = document.getElementById('aiImageSizeCustom');
+  var aiImageSizeInput = document.getElementById('aiImageSizeInput');
+  var aiImageSizeToggle = document.getElementById('aiImageSizeToggle');
+  var aiImageSizePanel = document.getElementById('aiImageSizePanel');
   var aiImageCountInput = document.getElementById('aiImageCount');
   var aiUseLayerInput = document.getElementById('aiUseLayer');
   var aiImageInsertModeSelect = document.getElementById('aiImageInsertMode');
@@ -203,9 +222,20 @@
   var aiPreviewImg = document.getElementById('aiPreviewImg');
   var aiPreviewCloseBtn = document.getElementById('aiPreviewClose');
   var aiPreviewFitBtn = document.getElementById('aiPreviewFit');
+  var aiPreview50Btn = document.getElementById('aiPreview50');
   var aiPreview100Btn = document.getElementById('aiPreview100');
+  var aiPreview200Btn = document.getElementById('aiPreview200');
+  var aiPreview400Btn = document.getElementById('aiPreview400');
+  var aiPreviewZoomOutBtn = document.getElementById('aiPreviewZoomOut');
+  var aiPreviewZoomInBtn = document.getElementById('aiPreviewZoomIn');
+  var aiPreviewMaxBtn = document.getElementById('aiPreviewMax');
+  var aiPreviewBody = document.getElementById('aiPreviewBody');
+  var aiPreviewPromptEl = document.getElementById('aiPreviewPrompt');
+  var aiPreviewPromptText = document.getElementById('aiPreviewPromptText');
+  var aiPreviewCopyPromptBtn = document.getElementById('aiPreviewCopyPrompt');
   var aiHistoryEl = document.getElementById('aiHistory');
   var aiHistoryCloseBtn = document.getElementById('aiHistoryClose');
+  var aiHistoryFixedBtn = document.getElementById('aiHistoryFixed');
   var aiHistoryTabs = document.getElementById('aiHistoryTabs');
   var aiHistoryImagesEl = document.getElementById('aiHistoryImages');
   var aiHistoryTextsEl = document.getElementById('aiHistoryTexts');
@@ -259,7 +289,13 @@
   var lastErrorUrl = '';
   var aiSelectedId = null;
   var aiGeneratedImages = [];
+  var aiExpectedCount = 0;
+  var aiResultItems = [];
   var aiPreviewMode = 'fit';
+  var aiPreviewScale = 1;
+  var aiPreviewItem = null;
+  var aiPreviewIsMax = false;
+  var aiPreviewDrag = { active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 };
   var aiInitDone = false;
 
   var nodeRequire = (typeof window !== 'undefined' && window.require) ? window.require : null;
@@ -532,6 +568,7 @@
   var aiCacheQueue = [];
   var aiCacheBusy = false;
   var aiCacheDir = '';
+  var aiCacheRoot = '';
 
   function ensureDirPath(mods, dir) {
     if (!mods || !mods.fs || !dir) return false;
@@ -545,13 +582,41 @@
     }
   }
 
+  function getAiCacheRoot() {
+    if (aiCacheRoot) return aiCacheRoot;
+    var mods = getNodeModules();
+    if (!mods) return '';
+    var base = '';
+    try {
+      base = cs.getSystemPath(SystemPath.APPDATA);
+    } catch (e) {
+      base = '';
+    }
+    var dir = '';
+    try {
+      if (base) {
+        dir = mods.path.join(base, 'NiuAssistCache');
+      } else {
+        dir = mods.path.join(extPath, 'cache');
+      }
+    } catch (e2) {
+      dir = '';
+    }
+    if (!dir) return '';
+    if (!ensureDirPath(mods, dir)) return '';
+    aiCacheRoot = dir;
+    return aiCacheRoot;
+  }
+
   function getAiCacheDir() {
     if (aiCacheDir) return aiCacheDir;
     var mods = getNodeModules();
     if (!mods) return '';
+    var root = getAiCacheRoot();
+    if (!root) return '';
     var dir = '';
     try {
-      dir = mods.path.join(extPath, 'cache', 'images');
+      dir = mods.path.join(root, 'images');
     } catch (e) {
       dir = '';
     }
@@ -644,6 +709,12 @@
     var size = settings ? resolveImageSize(settings) : '';
     items.forEach(function (item, idx) {
       if (!item || !item.url) return;
+      if (item._cached) return;
+      item._cached = true;
+      if (typeof item.progress !== 'number' || item.progress < 1) {
+        item.progress = 70;
+      }
+      updateAiJobProgress(item.id, item.progress);
       var ext = extractExtFromUrl(item.url, 'png');
       var baseName = 't2i_' + now + '_' + (idx + 1);
       var rawPath = dir + '/' + baseName + '.' + ext;
@@ -676,9 +747,17 @@
     if (!job) return;
     aiCacheBusy = true;
     setAiStatus('正在缓存素材...', '');
+    if (job.item) {
+      job.item.progress = Math.max(job.item.progress || 0, 75);
+      updateAiJobProgress(job.item.id, job.item.progress);
+    }
     downloadUrlToFile(job.url, job.rawPath, function (err) {
       if (err) {
         setAiStatus('缓存失败：' + err, 'warn');
+        if (job.item) {
+          job.item.progress = 100;
+          updateAiJobProgress(job.item.id, job.item.progress);
+        }
         aiCacheBusy = false;
         setTimeout(processAiCacheQueue, 60);
         return;
@@ -688,6 +767,10 @@
         job.item.localPath = job.rawPath;
         saveImageHistoryRecord(job);
         setAiStatus('缓存完成，可快速插入。', 'ok');
+        if (job.item) {
+          job.item.progress = 100;
+          updateAiJobProgress(job.item.id, job.item.progress);
+        }
         aiCacheBusy = false;
         setTimeout(processAiCacheQueue, 60);
         return;
@@ -700,6 +783,10 @@
       }
       pythonBusy = true;
       setAiStatus('压缩处理中…', '');
+      if (job.item) {
+        job.item.progress = Math.max(job.item.progress || 0, 85);
+        updateAiJobProgress(job.item.id, job.item.progress);
+      }
       runPythonTranscode(job.url, { referer: '', title: '' }, function (err2, outPath) {
         pythonBusy = false;
         if (err2 || !outPath) {
@@ -720,6 +807,10 @@
           saveImageHistoryRecord(job);
           setAiStatus('压缩完成，可快速插入。', 'ok');
         }
+        if (job.item) {
+          job.item.progress = 100;
+          updateAiJobProgress(job.item.id, job.item.progress);
+        }
         aiCacheBusy = false;
         setTimeout(processAiCacheQueue, 60);
       }, { maxSide: job.maxSide, format: 'jpeg', quality: job.quality });
@@ -731,9 +822,11 @@
   function getAiCacheMetaDir() {
     var mods = getNodeModules();
     if (!mods) return '';
+    var root = getAiCacheRoot();
+    if (!root) return '';
     var dir = '';
     try {
-      dir = mods.path.join(extPath, 'cache', 'meta');
+      dir = mods.path.join(root, 'meta');
     } catch (e) {
       dir = '';
     }
@@ -745,9 +838,11 @@
   function getAiCacheTextDir() {
     var mods = getNodeModules();
     if (!mods) return '';
+    var root = getAiCacheRoot();
+    if (!root) return '';
     var dir = '';
     try {
-      dir = mods.path.join(extPath, 'cache', 'text');
+      dir = mods.path.join(root, 'text');
     } catch (e) {
       dir = '';
     }
@@ -852,6 +947,48 @@
     }
   }
 
+  function getActiveHistoryTab() {
+    if (!aiHistoryTabs) return 'image';
+    var active = aiHistoryTabs.querySelector('button.active');
+    if (active && active.getAttribute) {
+      return active.getAttribute('data-tab') || 'image';
+    }
+    return 'image';
+  }
+
+  function deleteHistoryRecord(rec) {
+    if (!rec || !rec.id) return;
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) return;
+    try {
+      var metaDir = getAiCacheMetaDir();
+      if (metaDir) {
+        var metaPath = mods.path.join(metaDir, rec.id + '.json');
+        if (mods.fs.existsSync(metaPath)) {
+          mods.fs.unlinkSync(metaPath);
+        }
+      }
+    } catch (e) {}
+    try {
+      var indexPath = getAiHistoryIndexPath();
+      if (indexPath && mods.fs.existsSync(indexPath)) {
+        var content = mods.fs.readFileSync(indexPath, 'utf8');
+        var lines = content.split(/\r?\n/).filter(function (l) { return l.trim(); });
+        var kept = [];
+        lines.forEach(function (line) {
+          try {
+            var obj = JSON.parse(line);
+            if (obj && obj.id !== rec.id) kept.push(JSON.stringify(obj));
+          } catch (e) {}
+        });
+        var out = kept.join('\n');
+        if (out) out += '\n';
+        mods.fs.writeFileSync(indexPath, out, 'utf8');
+      }
+    } catch (e2) {}
+    openAiHistory(getActiveHistoryTab());
+  }
+
   function renderHistoryImages(records) {
     if (!aiHistoryImagesEl) return;
     aiHistoryImagesEl.innerHTML = '';
@@ -859,14 +996,57 @@
       aiHistoryImagesEl.innerHTML = '<div class="ai-text">暂无图片历史</div>';
       return;
     }
+    var mods = getNodeModules();
+    var fs = mods && mods.fs ? mods.fs : null;
+    function fileExists(p) {
+      try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
+    }
     records.forEach(function (rec) {
       var card = document.createElement('div');
       card.className = 'ai-history-item';
-      var img = document.createElement('img');
-      img.className = 'ai-history-thumb';
-      var showUrl = rec.localPath ? formatFileUrl(rec.localPath) : (rec.url || '');
-      img.src = showUrl;
-      card.appendChild(img);
+      var thumb = document.createElement('div');
+      thumb.className = 'ai-history-thumb';
+      var localPath = rec.localPath || rec.insertPath || '';
+      var rawPath = rec.rawPath || '';
+      var showUrl = '';
+      var insertPath = '';
+      var deleteBtn = document.createElement('button');
+      deleteBtn.textContent = '删除';
+      deleteBtn.classList.add('hidden');
+      if (fileExists(localPath)) {
+        showUrl = formatFileUrl(localPath);
+        insertPath = localPath;
+      } else if (fileExists(rawPath)) {
+        showUrl = formatFileUrl(rawPath);
+        insertPath = rawPath;
+      } else if (rec.url) {
+        showUrl = rec.url;
+      }
+      function markMissing() {
+        thumb.classList.add('missing');
+        thumb.textContent = '已过期';
+        if (deleteBtn) deleteBtn.classList.remove('hidden');
+      }
+      var img = null;
+      if (showUrl) {
+        img = document.createElement('img');
+        img.src = showUrl;
+        img.addEventListener('load', function () {
+          var w = img.naturalWidth || img.width || 0;
+          var h = img.naturalHeight || img.height || 0;
+          if (w > 0 && h > 0) {
+            thumb.style.setProperty('--thumb-ratio', w + ' / ' + h);
+          }
+        });
+        img.addEventListener('error', function () {
+          if (img && img.parentNode) img.parentNode.removeChild(img);
+          markMissing();
+        });
+        thumb.appendChild(img);
+      } else {
+        markMissing();
+      }
+      card.appendChild(thumb);
       var meta = document.createElement('div');
       meta.className = 'ai-history-meta';
       meta.textContent = rec.model || rec.size || '历史记录';
@@ -876,17 +1056,37 @@
       var insertBtn = document.createElement('button');
       insertBtn.textContent = '导入图层';
       insertBtn.addEventListener('click', function () {
-        var item = { url: rec.url || showUrl, localPath: rec.insertPath || rec.localPath || '' };
+        var item = { url: rec.url || showUrl, localPath: insertPath || '' };
         insertAiImageUrl(item, (aiState && aiState.imageInsertMode === 'replace') ? 'replace' : 'insert');
       });
       actions.appendChild(insertBtn);
       var previewBtn = document.createElement('button');
       previewBtn.textContent = '预览';
       previewBtn.addEventListener('click', function () {
-        openAiPreview({ url: showUrl });
+        if (!showUrl) return;
+        openAiPreview({ url: showUrl, prompt: rec.prompt, recordId: rec.id });
       });
       actions.appendChild(previewBtn);
+      deleteBtn.addEventListener('click', function () {
+        deleteHistoryRecord(rec);
+      });
+      actions.appendChild(deleteBtn);
       card.appendChild(actions);
+      if (rec.prompt) {
+        var tip = document.createElement('div');
+        tip.className = 'ai-history-tip';
+        var tipText = document.createElement('div');
+        tipText.textContent = rec.prompt;
+        tip.appendChild(tipText);
+        var copyBtn = document.createElement('button');
+        copyBtn.textContent = '复制提示词';
+        copyBtn.addEventListener('click', function (ev) {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          copyToClipboard(rec.prompt);
+        });
+        tip.appendChild(copyBtn);
+        card.appendChild(tip);
+      }
       aiHistoryImagesEl.appendChild(card);
     });
   }
@@ -1811,61 +2011,141 @@
     return AI_IMAGE_SIZES_DEFAULT.slice();
   }
 
+  function getSizeLabel(value) {
+    var size = (value || '').trim();
+    if (!size) return '';
+    return AI_IMAGE_SIZE_TO_LABEL[size] || size;
+  }
+
+  function getSizeByRatio(ratio) {
+    var r = (ratio || '').trim();
+    if (!r) return '';
+    for (var i = 0; i < AI_IMAGE_PRESETS.length; i += 1) {
+      if (AI_IMAGE_PRESETS[i].ratio === r) {
+        return AI_IMAGE_PRESETS[i].sizes[0] || '';
+      }
+    }
+    return '';
+  }
+
+  function normalizeSizeValue(value) {
+    if (!value) return '';
+    var raw = String(value).trim();
+    if (!raw) return '';
+    if (AI_IMAGE_LABEL_TO_SIZE[raw]) raw = AI_IMAGE_LABEL_TO_SIZE[raw];
+    if (raw.indexOf(':') !== -1 && raw.indexOf('x') === -1) {
+      var mapped = getSizeByRatio(raw);
+      if (mapped) raw = mapped;
+    }
+    var info = parseSize(raw);
+    if (!info) return '';
+    var norm = normalizeSize(info.w, info.h);
+    if (!norm) return info.w + 'x' + info.h;
+    return norm.width + 'x' + norm.height;
+  }
+
+  function readImageSizeFromInput() {
+    var raw = (aiImageSizeInput && aiImageSizeInput.value || '').trim();
+    if (!raw) return { size: AI_DEFAULTS.imageSize || '', mode: 'preset' };
+    if (AI_IMAGE_LABEL_TO_SIZE[raw]) {
+      return { size: AI_IMAGE_LABEL_TO_SIZE[raw], mode: 'preset' };
+    }
+    var strict = parseStrictSize(raw);
+    if (strict) return { size: strict.w + 'x' + strict.h, mode: 'custom' };
+    var loose = parseSize(raw);
+    if (loose) {
+      var s = loose.w + 'x' + loose.h;
+      return { size: s, mode: AI_IMAGE_SIZE_TO_LABEL[s] ? 'preset' : 'custom' };
+    }
+    return { size: AI_DEFAULTS.imageSize || '', mode: 'preset' };
+  }
+
+  function commitImageSizeInput(silent) {
+    if (!aiImageSizeInput) return;
+    var raw = (aiImageSizeInput.value || '').trim();
+    if (!raw) {
+      var fallback = normalizeSizeValue(aiState && aiState.imageSize || AI_DEFAULTS.imageSize || '');
+      aiImageSizeInput.value = getSizeLabel(fallback);
+      return;
+    }
+    var isPreset = !!AI_IMAGE_LABEL_TO_SIZE[raw];
+    var strict = parseStrictSize(raw);
+    if (!isPreset && !strict) {
+      setAiStatus('尺寸格式无效，请输入如 3000x2000。', 'err');
+      var last = normalizeSizeValue(aiState && aiState.imageSize || AI_DEFAULTS.imageSize || '');
+      aiImageSizeInput.value = getSizeLabel(last);
+      return;
+    }
+    var sizeStr = isPreset ? AI_IMAGE_LABEL_TO_SIZE[raw] : (strict.w + 'x' + strict.h);
+    var normalized = normalizeSizeValue(sizeStr);
+    if (!normalized) normalized = sizeStr;
+    if (aiState) {
+      aiState.imageSize = normalized;
+      aiState.imageSizeMode = (isPreset || AI_IMAGE_SIZE_TO_LABEL[normalized]) ? 'preset' : 'custom';
+      saveAiSettings(aiState);
+    }
+    aiImageSizeInput.value = getSizeLabel(normalized);
+    if (!silent && normalized !== sizeStr) {
+      setAiStatus('尺寸已调整为 ' + normalized + '。', 'warn');
+    }
+    closeSizePanel();
+  }
+
   var isUpdatingSizeOptions = false;
 
-  function refreshImageSizeOptions(modelId) {
-    if (!aiImageSizeSelect) return;
-    var list = getImageSizeListForModel(modelId);
-    var current = resolveImageSize(aiState || {}) || '';
-    isUpdatingSizeOptions = true;
-    aiImageSizeSelect.innerHTML = '';
-    list.forEach(function (s) {
-      var opt = document.createElement('option');
-      opt.value = s;
-      opt.textContent = s;
-      aiImageSizeSelect.appendChild(opt);
+  function buildSizePanel() {
+    if (!aiImageSizePanel) return;
+    aiImageSizePanel.innerHTML = '';
+    var current = normalizeSizeValue(aiState && aiState.imageSize ? aiState.imageSize : AI_DEFAULTS.imageSize);
+    var currentLabel = getSizeLabel(current);
+    AI_IMAGE_LABELS.forEach(function (label) {
+      var item = document.createElement('div');
+      item.className = 'ai-size-option' + (label === currentLabel ? ' selected' : '');
+      item.textContent = label;
+      item.addEventListener('click', function () {
+        if (!aiImageSizeInput) return;
+        aiImageSizeInput.value = label;
+        if (!aiState) aiState = getAiSettings();
+        commitImageSizeInput();
+      });
+      aiImageSizePanel.appendChild(item);
     });
-    var customOpt = document.createElement('option');
-    customOpt.value = '__custom__';
-    customOpt.textContent = '自定义';
-    aiImageSizeSelect.appendChild(customOpt);
-    var hasCurrent = list.indexOf(current) !== -1;
-    if (hasCurrent) {
-      aiImageSizeSelect.value = current;
-      if (aiImageSizeCustomInput) aiImageSizeCustomInput.classList.add('hidden');
-      aiImageSizeSelect.classList.remove('hidden');
-    } else {
-      aiImageSizeSelect.value = list[0];
-      if (aiImageSizeCustomInput) aiImageSizeCustomInput.classList.add('hidden');
-      aiImageSizeSelect.classList.remove('hidden');
-      if (aiState) {
-        aiState.imageSize = list[0];
-        aiState.imageSizeMode = 'preset';
-        saveAiSettings(aiState);
-      }
+  }
+
+  function openSizePanel() {
+    if (!aiImageSizePanel) return;
+    buildSizePanel();
+    aiImageSizePanel.classList.remove('hidden');
+  }
+
+  function closeSizePanel() {
+    if (!aiImageSizePanel) return;
+    aiImageSizePanel.classList.add('hidden');
+  }
+
+  function toggleSizePanel() {
+    if (!aiImageSizePanel) return;
+    if (aiImageSizePanel.classList.contains('hidden')) openSizePanel();
+    else closeSizePanel();
+  }
+
+  function refreshImageSizeOptions(modelId) {
+    if (!aiImageSizePanel) return;
+    var list = getImageSizeListForModel(modelId);
+    isUpdatingSizeOptions = true;
+    if (aiImageSizePanel && !aiImageSizePanel.classList.contains('hidden')) {
+      buildSizePanel();
     }
     isUpdatingSizeOptions = false;
   }
 
   function updateImageSizeUI() {
-    if (!aiState) return;
+    if (!aiState || !aiImageSizeInput) return;
     var modelId = getSelectedModelId(aiState);
     refreshImageSizeOptions(modelId);
-    if (!aiImageSizeSelect || !aiImageSizeCustomInput) return;
-    var size = aiState.imageSize || AI_DEFAULTS.imageSize;
-    var mode = aiState.imageSizeMode || 'preset';
-    var list = getImageSizeListForModel(modelId);
-    var hasPreset = list.indexOf(size) !== -1;
-    if (mode === 'custom' || !hasPreset) {
-      aiImageSizeSelect.value = '__custom__';
-      aiImageSizeCustomInput.classList.remove('hidden');
-      aiImageSizeSelect.classList.add('hidden');
-      aiImageSizeCustomInput.value = size;
-    } else {
-      aiImageSizeSelect.value = size;
-      aiImageSizeCustomInput.classList.add('hidden');
-      aiImageSizeSelect.classList.remove('hidden');
-    }
+    var size = normalizeSizeValue(aiState.imageSize || AI_DEFAULTS.imageSize);
+    if (!size) size = AI_DEFAULTS.imageSize;
+    aiImageSizeInput.value = getSizeLabel(size);
   }
 
   function maskApiKey(value) {
@@ -2102,17 +2382,9 @@
     if (!aiState) return;
     var key = type || aiState.type || 'image';
     if (!aiState.featureParams) aiState.featureParams = {};
-    var sizeMode = aiState.imageSizeMode || 'preset';
-    var sizeVal = aiState.imageSize || AI_DEFAULTS.imageSize;
-    if (aiImageSizeSelect) {
-      if (aiImageSizeSelect.value === '__custom__') {
-        sizeMode = 'custom';
-        sizeVal = (aiImageSizeCustomInput && aiImageSizeCustomInput.value || '').trim();
-      } else {
-        sizeMode = 'preset';
-        sizeVal = aiImageSizeSelect.value;
-      }
-    }
+    var sizeInfo = readImageSizeFromInput();
+    var sizeMode = sizeInfo.mode || (aiState.imageSizeMode || 'preset');
+    var sizeVal = normalizeSizeValue(sizeInfo.size || aiState.imageSize || AI_DEFAULTS.imageSize) || AI_DEFAULTS.imageSize;
     aiState.featureParams[key] = {
       imageSize: sizeVal,
       imageSizeMode: sizeMode,
@@ -2198,15 +2470,9 @@
     if (aiPythonMaxSideInput) aiState.aiPythonMaxSide = parseInt(aiPythonMaxSideInput.value || '2000', 10) || 2000;
     if (aiPythonQualityInput) aiState.aiPythonQuality = parseInt(aiPythonQualityInput.value || '80', 10) || 80;
     if (aiTextTaskSelect) aiState.textTask = aiTextTaskSelect.value || 'rewrite';
-    if (aiImageSizeSelect) {
-      if (aiImageSizeSelect.value === '__custom__') {
-        aiState.imageSizeMode = 'custom';
-        aiState.imageSize = (aiImageSizeCustomInput && aiImageSizeCustomInput.value || '').trim();
-      } else {
-        aiState.imageSizeMode = 'preset';
-        aiState.imageSize = aiImageSizeSelect.value;
-      }
-    }
+    var sizeInfo = readImageSizeFromInput();
+    aiState.imageSizeMode = sizeInfo.mode || 'preset';
+    aiState.imageSize = normalizeSizeValue(sizeInfo.size || aiState.imageSize || AI_DEFAULTS.imageSize) || AI_DEFAULTS.imageSize;
     if (aiModelSelect) {
       if (aiModelSelect.value === '__custom__') {
         setSelectedModelForCurrent((aiModelCustomInput && aiModelCustomInput.value || '').trim(), true);
@@ -2484,6 +2750,8 @@
 
   function clearAiResult() {
     aiGeneratedImages = [];
+    aiResultItems = [];
+    aiExpectedCount = 0;
     aiSelectedId = null;
     closeAiPreview();
     if (aiResultEl) aiResultEl.innerHTML = '';
@@ -2497,22 +2765,114 @@
     }
   }
 
+  function updatePreviewPrompt(item) {
+    if (!aiPreviewPromptEl || !aiPreviewPromptText) return;
+    var prompt = item && item.prompt ? String(item.prompt) : '';
+    aiPreviewPromptText.textContent = prompt || '';
+    aiPreviewPromptEl.classList.toggle('hidden', !prompt);
+    if (aiPreviewCopyPromptBtn) {
+      aiPreviewCopyPromptBtn.disabled = !prompt;
+    }
+  }
+
+  function applyPreviewScale(scale) {
+    if (!aiPreviewImg) return;
+    var w = aiPreviewImg.naturalWidth || aiPreviewImg.width || 0;
+    var h = aiPreviewImg.naturalHeight || aiPreviewImg.height || 0;
+    if (!w || !h) return;
+    aiPreviewImg.style.maxWidth = 'none';
+    aiPreviewImg.style.maxHeight = 'none';
+    aiPreviewImg.style.width = Math.round(w * scale) + 'px';
+    aiPreviewImg.style.height = Math.round(h * scale) + 'px';
+    if (aiPreviewBody) {
+      aiPreviewBody.classList.toggle('is-pan', scale > 1);
+    }
+  }
+
   function setAiPreviewMode(mode) {
-    aiPreviewMode = mode === '100' ? '100' : 'fit';
+    aiPreviewMode = mode === 'fit' ? 'fit' : 'scale';
+    if (!aiPreviewImg) return;
+    if (aiPreviewMode === 'fit') {
+      aiPreviewScale = 1;
+      aiPreviewImg.style.width = '';
+      aiPreviewImg.style.height = '';
+      aiPreviewImg.style.maxWidth = '100%';
+      aiPreviewImg.style.maxHeight = '100%';
+      if (aiPreviewBody) {
+        aiPreviewBody.scrollLeft = 0;
+        aiPreviewBody.scrollTop = 0;
+        aiPreviewBody.classList.remove('is-pan');
+        aiPreviewBody.classList.remove('dragging');
+      }
+    } else {
+      applyPreviewScale(aiPreviewScale || 1);
+    }
+  }
+
+  function setAiPreviewScale(scale) {
+    var s = Math.max(0.25, Math.min(4, Number(scale) || 1));
+    aiPreviewScale = s;
+    aiPreviewMode = 'scale';
+    applyPreviewScale(aiPreviewScale);
+  }
+
+  function zoomPreviewStep(dir) {
+    var levels = [0.5, 1, 2, 4];
+    var current = aiPreviewScale || 1;
+    var idx = -1;
+    for (var i = 0; i < levels.length; i += 1) {
+      if (Math.abs(levels[i] - current) < 0.01) { idx = i; break; }
+    }
+    if (idx === -1) {
+      idx = 1;
+      for (var j = 0; j < levels.length; j += 1) {
+        if (levels[j] >= current) { idx = j; break; }
+      }
+    }
+    var next = idx + (dir > 0 ? 1 : -1);
+    if (next < 0) next = 0;
+    if (next >= levels.length) next = levels.length - 1;
+    setAiPreviewScale(levels[next]);
+  }
+
+  function togglePreviewMax() {
     if (!aiPreviewEl) return;
-    aiPreviewEl.classList.toggle('preview-100', aiPreviewMode === '100');
+    var card = aiPreviewEl.querySelector('.ai-preview-card');
+    if (!card) return;
+    aiPreviewIsMax = !aiPreviewIsMax;
+    card.classList.toggle('is-max', aiPreviewIsMax);
+    if (aiPreviewMaxBtn) aiPreviewMaxBtn.textContent = aiPreviewIsMax ? '还原' : '最大化';
   }
 
   function openAiPreview(item) {
     if (!aiPreviewEl || !aiPreviewImg || !item) return;
+    aiPreviewItem = item;
+    updatePreviewPrompt(item);
+    aiPreviewImg.onload = function () {
+      if (aiPreviewMode === 'fit') setAiPreviewMode('fit');
+      else applyPreviewScale(aiPreviewScale || 1);
+    };
     aiPreviewImg.src = item.url;
     setAiPreviewMode('fit');
+    if (aiPreviewBody) {
+      aiPreviewBody.scrollLeft = 0;
+      aiPreviewBody.scrollTop = 0;
+      aiPreviewBody.classList.remove('dragging');
+    }
+    if (aiPreviewMaxBtn) {
+      aiPreviewMaxBtn.textContent = aiPreviewIsMax ? '还原' : '最大化';
+    }
     aiPreviewEl.classList.add('open');
   }
 
   function closeAiPreview() {
     if (!aiPreviewEl) return;
     aiPreviewEl.classList.remove('open');
+    if (aiPreviewBody) {
+      aiPreviewBody.classList.remove('dragging');
+      aiPreviewBody.classList.remove('is-pan');
+    }
+    aiPreviewItem = null;
   }
 
   function selectAiImage(id) {
@@ -2531,7 +2891,9 @@
     if (aiSelectedId) {
       found = aiGeneratedImages.filter(function (it) { return it.id === aiSelectedId; })[0] || null;
     }
-    return found || aiGeneratedImages[0] || null;
+    if (found && found.url) return found;
+    var ready = aiGeneratedImages.filter(function (it) { return it.url; })[0] || null;
+    return ready || found || aiGeneratedImages[0] || null;
   }
 
   function insertAiImageUrl(input, insertMode, cb) {
@@ -2621,6 +2983,99 @@
     });
   }
 
+  function createAiProgressOverlay(progress) {
+    var overlay = document.createElement('div');
+    overlay.className = 'ai-result-progress';
+    var ring = document.createElement('div');
+    ring.className = 'ai-progress-ring';
+    var text = document.createElement('div');
+    text.className = 'ai-progress-text';
+    text.textContent = Math.max(0, Math.min(100, Math.round(progress || 0))) + '%';
+    overlay.appendChild(ring);
+    overlay.appendChild(text);
+    return overlay;
+  }
+
+  function updateAiJobProgress(id, progress) {
+    if (!aiResultEl || !id) return;
+    var card = aiResultEl.querySelector('.ai-result-item[data-id="' + id + '"]');
+    if (!card) return;
+    var overlay = card.querySelector('.ai-result-progress');
+    var pct = Math.max(0, Math.min(100, Math.round(progress || 0)));
+    if (!overlay && pct < 100) {
+      overlay = createAiProgressOverlay(pct);
+      card.appendChild(overlay);
+    }
+    if (overlay) {
+      var text = overlay.querySelector('.ai-progress-text');
+      if (text) text.textContent = pct + '%';
+      overlay.classList.toggle('hidden', pct >= 100);
+    }
+  }
+
+  function initAiPlaceholders(count, promptText) {
+    aiGeneratedImages = [];
+    aiResultItems = [];
+    var total = count || 1;
+    aiExpectedCount = total;
+    var now = Date.now();
+    for (var i = 0; i < total; i += 1) {
+      aiGeneratedImages.push({
+        id: 'ai_job_' + now + '_' + i,
+        url: '',
+        label: '图片' + (i + 1),
+        prompt: promptText || '',
+        progress: 5,
+        status: 'queued',
+        _cached: false
+      });
+    }
+    aiSelectedId = aiGeneratedImages[0] ? aiGeneratedImages[0].id : null;
+    renderAiResult(aiGeneratedImages, 'image');
+    aiGeneratedImages.forEach(function (item) {
+      updateAiJobProgress(item.id, item.progress);
+    });
+  }
+
+  function applyAiResults(items, promptText) {
+    var now = Date.now();
+    var expected = Math.max(aiExpectedCount || 0, items.length);
+    var next = [];
+    for (var i = 0; i < expected; i += 1) {
+      var it = items[i] || null;
+      var prev = aiGeneratedImages[i] || null;
+      if (it) {
+        next.push({
+          id: prev ? prev.id : ('ai_' + now + '_' + i),
+          url: it.url || '',
+          label: it.label || it.url || ('图片' + (i + 1)),
+          prompt: (it.prompt != null ? it.prompt : promptText) || '',
+          progress: typeof it.progress === 'number' ? it.progress : (it.url ? 70 : 5),
+          status: it.status || (it.url ? 'downloading' : 'queued'),
+          localPath: it.localPath || '',
+          rawPath: it.rawPath || '',
+          _cached: prev ? !!prev._cached : false
+        });
+      } else if (prev) {
+        next.push(prev);
+      } else {
+        next.push({
+          id: 'ai_job_' + now + '_' + i,
+          url: '',
+          label: '图片' + (i + 1),
+          prompt: promptText || '',
+          progress: 5,
+          status: 'queued',
+          _cached: false
+        });
+      }
+    }
+    aiGeneratedImages = next;
+    var ready = aiGeneratedImages.filter(function (it) { return it.url; })[0] || null;
+    aiSelectedId = (ready || aiGeneratedImages[0]) ? (ready || aiGeneratedImages[0]).id : null;
+    renderAiResult(aiGeneratedImages, 'image');
+  }
+
   function renderAiResult(items, type) {
     if (!aiResultEl) return;
     aiResultEl.innerHTML = '';
@@ -2637,15 +3092,24 @@
     }
     if (type === 'image') {
       var promptText = (aiPromptInput && aiPromptInput.value || '').trim();
+      var now = Date.now();
       aiGeneratedImages = items.map(function (it, idx) {
+        var id = it.id || ('ai_' + now + '_' + idx);
+        var url = it.url || '';
+        var progress = (typeof it.progress === 'number') ? it.progress : (url ? 70 : 5);
         return {
-          id: it.id || ('ai_' + Date.now() + '_' + idx),
-          url: it.url,
+          id: id,
+          url: url,
           label: it.label || it.url || ('图片' + (idx + 1)),
-          prompt: promptText
+          prompt: (it.prompt != null ? it.prompt : promptText) || '',
+          progress: progress,
+          status: it.status || (url ? 'downloading' : 'queued'),
+          localPath: it.localPath || '',
+          rawPath: it.rawPath || ''
         };
       });
-      aiSelectedId = aiGeneratedImages[0] ? aiGeneratedImages[0].id : null;
+      var firstReady = aiGeneratedImages.filter(function (it) { return it.url; })[0] || null;
+      aiSelectedId = (firstReady || aiGeneratedImages[0]) ? (firstReady || aiGeneratedImages[0]).id : null;
 
       var actionBar = document.createElement('div');
       actionBar.className = 'ai-result-actions';
@@ -2677,14 +3141,7 @@
       });
       actionBar.appendChild(previewBtn);
 
-      var historyBtn = document.createElement('button');
-      historyBtn.textContent = '历史';
-      historyBtn.addEventListener('click', function () {
-        openAiHistory('image');
-      });
-      actionBar.appendChild(historyBtn);
-
-      aiResultEl.appendChild(actionBar);
+        aiResultEl.appendChild(actionBar);
 
       var grid = document.createElement('div');
       grid.className = 'ai-result-grid' + (aiGeneratedImages.length === 1 ? ' single' : '');
@@ -2693,15 +3150,35 @@
         card.className = 'ai-result-item';
         card.setAttribute('data-id', item.id);
 
-        var img = document.createElement('img');
-        img.className = 'ai-result-thumb';
-        img.src = item.url;
-        card.appendChild(img);
+        if (item.url) {
+          var img = document.createElement('img');
+          img.className = 'ai-result-thumb';
+          img.src = item.url;
+          img.addEventListener('load', function () {
+            var w = img.naturalWidth || img.width || 0;
+            var h = img.naturalHeight || img.height || 0;
+            if (w > 0 && h > 0) {
+              card.style.setProperty('--thumb-ratio', w + ' / ' + h);
+            }
+          });
+          card.appendChild(img);
+        } else {
+          var placeholder = document.createElement('div');
+          placeholder.className = 'ai-result-thumb placeholder';
+          placeholder.textContent = '生成中';
+          card.appendChild(placeholder);
+        }
 
         var meta = document.createElement('div');
         meta.className = 'ai-result-meta';
         meta.textContent = item.label;
         card.appendChild(meta);
+
+        var prog = typeof item.progress === 'number' ? item.progress : (item.url ? 100 : 5);
+        if (prog < 100) {
+          var overlay = createAiProgressOverlay(prog);
+          card.appendChild(overlay);
+        }
 
         if (item.prompt) {
           var tip = document.createElement('div');
@@ -2808,34 +3285,73 @@
   }
 
   function resolveImageSize(settings) {
-    if (aiImageSizeCustomInput && !aiImageSizeCustomInput.classList.contains('hidden')) {
-      var customVal = (aiImageSizeCustomInput.value || '').trim();
-      if (customVal) {
-        if (customVal.indexOf(':') !== -1) return '';
-        return customVal;
-      }
+    var raw = (aiImageSizeInput && aiImageSizeInput.value || '').trim();
+    if (!raw) raw = (settings && settings.imageSize ? String(settings.imageSize).trim() : '');
+    if (!raw) return AI_DEFAULTS.imageSize || '';
+    if (AI_IMAGE_LABEL_TO_SIZE[raw]) return AI_IMAGE_LABEL_TO_SIZE[raw];
+    if (raw.indexOf(':') !== -1 && raw.indexOf('x') === -1) {
+      var mapped = getSizeByRatio(raw);
+      if (mapped) return mapped;
     }
-    if (aiImageSizeSelect) {
-      var val = aiImageSizeSelect.value;
-      if (val === '__custom__') {
-        val = (aiImageSizeCustomInput && aiImageSizeCustomInput.value || '').trim();
-      }
-      if (val && String(val).indexOf(':') !== -1) return '';
-      return val;
-    }
-    var fallback = (settings.imageSize || '').trim();
-    if (fallback && fallback.indexOf(':') !== -1) return '';
-    return fallback;
+    var info = parseStrictSize(raw) || parseSize(raw);
+    if (info) return info.w + 'x' + info.h;
+    return AI_DEFAULTS.imageSize || '';
   }
 
-  function parseSize(size) {
+  function parseStrictSize(size) {
     if (!size) return null;
-    var m = String(size).toLowerCase().match(/^(\d+)\s*x\s*(\d+)$/);
+    var m = String(size).match(/^(\d+)x(\d+)$/);
     if (!m) return null;
     var w = parseInt(m[1], 10);
     var h = parseInt(m[2], 10);
     if (!w || !h) return null;
     return { w: w, h: h, pixels: w * h };
+  }
+
+  function parseSize(size) {
+    if (!size) return null;
+    var m = String(size).toLowerCase().match(/(\d+)\s*x\s*(\d+)/);
+    if (!m) return null;
+    var w = parseInt(m[1], 10);
+    var h = parseInt(m[2], 10);
+    if (!w || !h) return null;
+    return { w: w, h: h, pixels: w * h };
+  }
+
+  function normalizeSize(w, h) {
+    if (!w || !h) return null;
+    var width = Math.max(1, Math.round(w));
+    var height = Math.max(1, Math.round(h));
+    var pixels = width * height;
+    var scale = 1;
+    if (pixels < AI_SIZE_MIN_PIXELS) {
+      scale = Math.sqrt(AI_SIZE_MIN_PIXELS / pixels);
+      width = width * scale;
+      height = height * scale;
+    }
+    pixels = width * height;
+    if (width > AI_SIZE_MAX_W || height > AI_SIZE_MAX_H || pixels > AI_SIZE_MAX_PIXELS) {
+      var scaleDown = Math.min(
+        AI_SIZE_MAX_W / width,
+        AI_SIZE_MAX_H / height,
+        Math.sqrt(AI_SIZE_MAX_PIXELS / pixels)
+      );
+      width = width * scaleDown;
+      height = height * scaleDown;
+    }
+    var downW = Math.floor(width / AI_SIZE_MULTIPLE) * AI_SIZE_MULTIPLE;
+    var downH = Math.floor(height / AI_SIZE_MULTIPLE) * AI_SIZE_MULTIPLE;
+    if (downW < AI_SIZE_MULTIPLE) downW = AI_SIZE_MULTIPLE;
+    if (downH < AI_SIZE_MULTIPLE) downH = AI_SIZE_MULTIPLE;
+    if (downW * downH < AI_SIZE_MIN_PIXELS) {
+      var upW = Math.ceil(width / AI_SIZE_MULTIPLE) * AI_SIZE_MULTIPLE;
+      var upH = Math.ceil(height / AI_SIZE_MULTIPLE) * AI_SIZE_MULTIPLE;
+      if (upW <= AI_SIZE_MAX_W && upH <= AI_SIZE_MAX_H && upW * upH <= AI_SIZE_MAX_PIXELS) {
+        downW = upW;
+        downH = upH;
+      }
+    }
+    return { width: downW, height: downH, pixels: downW * downH };
   }
 
   function checkReturnedImageSize(items, requestedSize) {
@@ -2854,7 +3370,7 @@
     } catch (e) {}
   }
 
-  function fetchExtraImages(baseUrl, settings, payload, remaining, cb) {
+  function fetchExtraImages(baseUrl, settings, payload, remaining, cb, onItem) {
     var results = [];
     var left = remaining || 0;
     if (left <= 0) {
@@ -2872,60 +3388,47 @@
       single.num_images = 1;
       single.batch_size = 1;
       single.image_count = 1;
-      fetchJsonWithStatus(baseUrl + 'images/generations', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + settings.apiKey
-        },
-        body: JSON.stringify(single)
-      }, function (res) {
-        if (res.ok) {
-          var json = res.data || {};
-          var items = extractImageResults(json);
-          if (items && items.length) {
-            results.push(items[0]);
+        fetchJsonWithStatus(baseUrl + 'images/generations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + settings.apiKey
+          },
+          body: JSON.stringify(single)
+        }, function (res) {
+          if (res.ok) {
+            var json = res.data || {};
+            var items = extractImageResults(json);
+            if (items && items.length) {
+              results.push(items[0]);
+              if (onItem) {
+                try { onItem(items[0]); } catch (e) {}
+              }
+            }
           }
-        }
-        left -= 1;
-        setTimeout(next, 120);
-      });
+          left -= 1;
+          setTimeout(next, 120);
+        });
+      }
+      next();
     }
-    next();
-  }
 
   function enforceMinPixelsForModel(modelId, size) {
-    var id = (modelId || '').toLowerCase();
-    if (id.indexOf('seedream-4-5') === -1) return size;
     var info = parseSize(size);
     if (!info) return size;
-    var minPixels = 3686400;
-    if (info.pixels >= minPixels) return size;
-    var fallback = getImageSizeListForModel(modelId)[0] || '2560x1440';
-    if (aiImageSizeSelect) {
-      refreshImageSizeOptions(modelId);
-      var has = Array.prototype.some.call(aiImageSizeSelect.options, function (opt) {
-        return opt.value === fallback;
-      });
-      if (has) {
-        aiImageSizeSelect.value = fallback;
-        if (aiImageSizeCustomInput) aiImageSizeCustomInput.classList.add('hidden');
-      } else {
-        aiImageSizeSelect.value = '__custom__';
-        if (aiImageSizeCustomInput) {
-          aiImageSizeCustomInput.value = fallback;
-          aiImageSizeCustomInput.classList.remove('hidden');
-        }
+    var norm = normalizeSize(info.w, info.h);
+    if (!norm) return size;
+    var normalized = norm.width + 'x' + norm.height;
+    if (normalized !== (info.w + 'x' + info.h)) {
+      if (aiImageSizeInput) aiImageSizeInput.value = getSizeLabel(normalized);
+      if (aiState) {
+        aiState.imageSize = normalized;
+        aiState.imageSizeMode = AI_IMAGE_SIZE_TO_LABEL[normalized] ? 'preset' : 'custom';
+        saveAiSettings(aiState);
       }
+      setAiStatus('尺寸已调整为 ' + normalized + '（符合模型要求）。', 'warn');
     }
-    if (aiState) {
-      aiState.imageSize = fallback;
-      var list = getImageSizeListForModel(modelId);
-      aiState.imageSizeMode = list.indexOf(fallback) !== -1 ? 'preset' : 'custom';
-      saveAiSettings(aiState);
-    }
-    setAiStatus('已自动调整为 ' + fallback + '（即梦4.5 最小像素要求）。', 'err');
-    return fallback;
+    return normalized;
   }
 
   function requestImage(settings) {
@@ -2944,6 +3447,7 @@
       setAiStatus('请输入提示词。', 'err');
       return;
     }
+    commitImageSizeInput(true);
     var size = resolveImageSize(settings);
     var sizeNote = '';
     var originalSize = size || '';
@@ -2966,9 +3470,8 @@
       if (imageDataUrl) payload.image = imageDataUrl;
       setAiStatus('正在生成图像...', '');
       clearAiResult();
-    if (isAiDebug()) {
-      try { console.log('[AI] payload count', count, payload); } catch (e) {}
-    }
+      initAiPlaceholders(count, prompt);
+      try { console.log('[AI] payload', { model: payload.model, size: payload.size, n: count }); } catch (e) {}
     fetchJsonWithStatus(baseUrl + 'images/generations', {
       method: 'POST',
       headers: {
@@ -2983,9 +3486,7 @@
       }
       var json = res.data || {};
       var items = extractImageResults(json);
-      if (isAiDebug()) {
-        try { console.log('[AI] response images', items.length, json); } catch (e2) {}
-      }
+      try { console.log('[AI] response images', items.length); } catch (e2) {}
       if (!items.length) {
         setAiStatus('生成失败：未返回结果。', 'err');
         return;
@@ -2993,9 +3494,12 @@
       if (count > 1 && items.length < count) {
         var missing = count - items.length;
         setAiStatus('接口返回 ' + items.length + ' 张，正在补齐…', 'warn');
-        fetchExtraImages(baseUrl, settings, payload, missing, function (extra) {
-          var merged = items.concat(extra || []);
-          renderAiResult(merged, 'image');
+        aiResultItems = items.slice();
+        applyAiResults(aiResultItems, prompt);
+        queueAiCache(aiGeneratedImages, aiState);
+        fetchExtraImages(baseUrl, settings, payload, missing, function () {
+          var merged = aiResultItems.slice();
+          applyAiResults(merged, prompt);
           queueAiCache(aiGeneratedImages, aiState);
           if (sizeNote) {
             setAiStatus('生成完成（' + sizeNote + '）。', 'ok');
@@ -3003,10 +3507,15 @@
             setAiStatus('生成完成。', 'ok');
           }
           checkReturnedImageSize(merged, originalSize || size);
+        }, function (item) {
+          aiResultItems.push(item);
+          applyAiResults(aiResultItems, prompt);
+          queueAiCache(aiGeneratedImages, aiState);
         });
         return;
       }
-      renderAiResult(items, 'image');
+      aiResultItems = items.slice();
+      applyAiResults(aiResultItems, prompt);
       queueAiCache(aiGeneratedImages, aiState);
       if (sizeNote) {
         setAiStatus('生成完成（' + sizeNote + '）。', 'ok');
@@ -3867,49 +4376,48 @@
     });
   }
 
-  if (aiImageSizeSelect) {
-    aiImageSizeSelect.addEventListener('change', function () {
+  if (aiImageSizeInput) {
+    aiImageSizeInput.addEventListener('change', function () {
       if (!aiState) aiState = getAiSettings();
-      if (aiImageSizeSelect.value === '__custom__') {
-        if (isUpdatingSizeOptions) return;
-        aiState.imageSizeMode = 'custom';
-        if (aiImageSizeCustomInput) aiImageSizeCustomInput.classList.remove('hidden');
-        aiImageSizeSelect.classList.add('hidden');
-        aiState.imageSize = (aiImageSizeCustomInput && aiImageSizeCustomInput.value || '').trim();
-      } else {
-        if (isUpdatingSizeOptions) return;
-        aiState.imageSizeMode = 'preset';
-        aiState.imageSize = aiImageSizeSelect.value;
-        if (aiImageSizeCustomInput) aiImageSizeCustomInput.classList.add('hidden');
-        aiImageSizeSelect.classList.remove('hidden');
-      }
-      saveAiSettings(aiState);
+      if (isUpdatingSizeOptions) return;
+      commitImageSizeInput();
     });
-  }
-
-  if (aiImageSizeCustomInput) {
-    aiImageSizeCustomInput.addEventListener('input', function () {
+    aiImageSizeInput.addEventListener('blur', function () {
       if (!aiState) aiState = getAiSettings();
-      aiState.imageSizeMode = 'custom';
-      aiState.imageSize = aiImageSizeCustomInput.value.trim();
-      saveAiSettings(aiState);
+      if (isUpdatingSizeOptions) return;
+      commitImageSizeInput();
     });
-    aiImageSizeCustomInput.addEventListener('blur', function () {
-      var val = (aiImageSizeCustomInput.value || '').trim();
-      if (!val) {
-        aiImageSizeCustomInput.classList.add('hidden');
-        if (aiImageSizeSelect) {
-          aiImageSizeSelect.classList.remove('hidden');
-          aiImageSizeSelect.value = getImageSizeListForModel(getSelectedModelId(aiState))[0] || '1:1';
-        }
-        if (aiState) {
-          aiState.imageSizeMode = 'preset';
-          aiState.imageSize = aiImageSizeSelect ? aiImageSizeSelect.value : '1:1';
-          saveAiSettings(aiState);
-        }
+    aiImageSizeInput.addEventListener('click', function () {
+      openSizePanel();
+    });
+    aiImageSizeInput.addEventListener('focus', function () {
+      openSizePanel();
+    });
+    aiImageSizeInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'ArrowDown' || ev.key === 'Enter') {
+        openSizePanel();
       }
     });
   }
+  if (aiImageSizeToggle) {
+    aiImageSizeToggle.addEventListener('click', function (ev) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      toggleSizePanel();
+    });
+  }
+  document.addEventListener('click', function (ev) {
+    if (!aiImageSizePanel || aiImageSizePanel.classList.contains('hidden')) return;
+    if (aiImageSizePanel.contains(ev.target)) return;
+    if (aiImageSizeInput && aiImageSizeInput.contains(ev.target)) return;
+    if (aiImageSizeToggle && aiImageSizeToggle.contains(ev.target)) return;
+    closeSizePanel();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (!aiImageSizePanel || aiImageSizePanel.classList.contains('hidden')) return;
+    if (ev.key === 'Escape') {
+      closeSizePanel();
+    }
+  });
 
   if (aiImageCountInput) {
     aiImageCountInput.addEventListener('change', function () {
@@ -4001,15 +4509,98 @@
       setAiPreviewMode('fit');
     });
   }
+  if (aiPreview50Btn) {
+    aiPreview50Btn.addEventListener('click', function () {
+      setAiPreviewScale(0.5);
+    });
+  }
   if (aiPreview100Btn) {
     aiPreview100Btn.addEventListener('click', function () {
-      setAiPreviewMode('100');
+      setAiPreviewScale(1);
+    });
+  }
+  if (aiPreview200Btn) {
+    aiPreview200Btn.addEventListener('click', function () {
+      setAiPreviewScale(2);
+    });
+  }
+  if (aiPreview400Btn) {
+    aiPreview400Btn.addEventListener('click', function () {
+      setAiPreviewScale(4);
+    });
+  }
+  if (aiPreviewZoomOutBtn) {
+    aiPreviewZoomOutBtn.addEventListener('click', function () {
+      zoomPreviewStep(-1);
+    });
+  }
+  if (aiPreviewZoomInBtn) {
+    aiPreviewZoomInBtn.addEventListener('click', function () {
+      zoomPreviewStep(1);
+    });
+  }
+  if (aiPreviewMaxBtn) {
+    aiPreviewMaxBtn.addEventListener('click', function () {
+      togglePreviewMax();
+    });
+  }
+  if (aiPreviewCopyPromptBtn) {
+    aiPreviewCopyPromptBtn.addEventListener('click', function () {
+      if (aiPreviewItem && aiPreviewItem.prompt) copyToClipboard(aiPreviewItem.prompt);
     });
   }
   if (aiPreviewEl) {
     aiPreviewEl.addEventListener('click', function (e) {
       if (e.target && e.target.classList && e.target.classList.contains('ai-preview-backdrop')) {
         closeAiPreview();
+      }
+    });
+  }
+  if (aiPreviewBody) {
+    aiPreviewBody.addEventListener('wheel', function (e) {
+      if (!e || !e.ctrlKey) return;
+      if (e.preventDefault) e.preventDefault();
+      if (e.deltaY < 0) zoomPreviewStep(1);
+      else zoomPreviewStep(-1);
+    });
+    aiPreviewBody.addEventListener('mousedown', function (e) {
+      if (!aiPreviewBody.classList.contains('is-pan')) return;
+      aiPreviewDrag.active = true;
+      aiPreviewDrag.startX = e.pageX;
+      aiPreviewDrag.startY = e.pageY;
+      aiPreviewDrag.scrollLeft = aiPreviewBody.scrollLeft;
+      aiPreviewDrag.scrollTop = aiPreviewBody.scrollTop;
+      aiPreviewBody.classList.add('dragging');
+      if (e.preventDefault) e.preventDefault();
+    });
+  }
+  document.addEventListener('mousemove', function (e) {
+    if (!aiPreviewDrag.active || !aiPreviewBody) return;
+    var dx = e.pageX - aiPreviewDrag.startX;
+    var dy = e.pageY - aiPreviewDrag.startY;
+    aiPreviewBody.scrollLeft = aiPreviewDrag.scrollLeft - dx;
+    aiPreviewBody.scrollTop = aiPreviewDrag.scrollTop - dy;
+  });
+  document.addEventListener('mouseup', function () {
+    if (!aiPreviewDrag.active) return;
+    aiPreviewDrag.active = false;
+    if (aiPreviewBody) aiPreviewBody.classList.remove('dragging');
+  });
+
+  if (aiHistoryCloseBtn) {
+    aiHistoryCloseBtn.addEventListener('click', function () {
+      closeAiHistory();
+    });
+  }
+  if (aiHistoryFixedBtn) {
+    aiHistoryFixedBtn.addEventListener('click', function () {
+      openAiHistory(getActiveHistoryTab());
+    });
+  }
+  if (aiHistoryEl) {
+    aiHistoryEl.addEventListener('click', function (e) {
+      if (e.target && e.target.classList && e.target.classList.contains('ai-history-backdrop')) {
+        closeAiHistory();
       }
     });
   }
@@ -4033,10 +4624,26 @@
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e && e.key === 'Escape') {
-      if (aiTypeDropdown && aiTypeDropdown.classList.contains('open')) {
-        closeFeaturePicker();
-      }
+    if (!e || e.key !== 'Escape') return;
+    if (aiPreviewEl && aiPreviewEl.classList.contains('open')) {
+      closeAiPreview();
+      return;
+    }
+    if (aiHistoryEl && aiHistoryEl.classList.contains('open')) {
+      closeAiHistory();
+      return;
+    }
+    if (aiTypeDropdown && aiTypeDropdown.classList.contains('open')) {
+      closeFeaturePicker();
+      return;
+    }
+    if (aiImageSizePanel && !aiImageSizePanel.classList.contains('hidden')) {
+      closeSizePanel();
+      return;
+    }
+    if (aiModelPanel && aiModelPanel.classList.contains('open')) {
+      aiModelPanel.classList.remove('open');
+      return;
     }
   });
 

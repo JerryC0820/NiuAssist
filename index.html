@@ -144,13 +144,16 @@
           <label>提示</label>
           <span class="ai-inline-text">该类型暂未接入接口，仅展示模型列表。</span>
         </div>
-        <div class="ai-row inline ai-image-only">
-          <label>尺寸</label>
-          <select id="aiImageSizeSelect" class="ai-size-select"></select>
-          <input id="aiImageSizeCustom" type="text" class="ai-size-custom hidden" placeholder="自定义比例或尺寸">
-          <label class="inline-label">数量</label>
-          <input id="aiImageCount" type="number" min="1" max="8" value="1">
-        </div>
+          <div class="ai-row inline ai-image-only">
+            <label>尺寸</label>
+            <div class="ai-size-picker">
+              <input id="aiImageSizeInput" class="ai-size-input" placeholder="例如 2048x2048">
+              <button id="aiImageSizeToggle" class="ai-size-toggle" type="button">▾</button>
+              <div id="aiImageSizePanel" class="ai-size-panel hidden"></div>
+            </div>
+            <label class="inline-label">数量</label>
+            <input id="aiImageCount" type="number" min="1" max="8" value="1">
+          </div>
         <div class="ai-row inline ai-image-only">
           <label>图生图</label>
           <input id="aiUseLayer" type="checkbox" class="ai-toggle">
@@ -203,7 +206,10 @@
         </div>
       </div>
       <div class="ai-section ai-result-section">
-        <div class="ai-result-title">结果</div>
+        <div class="ai-result-header">
+          <div class="ai-result-title">结果</div>
+          <button id="aiHistoryFixed" class="ai-result-history">历史</button>
+        </div>
         <div id="aiResult" class="ai-result"></div>
       </div>
     </div>
@@ -219,11 +225,21 @@
         <span id="aiPreviewTitle" class="ai-preview-title">预览</span>
         <div class="ai-preview-actions">
           <button id="aiPreviewFit">适应</button>
+          <button id="aiPreview50">50%</button>
           <button id="aiPreview100">100%</button>
+          <button id="aiPreview200">200%</button>
+          <button id="aiPreview400">400%</button>
+          <button id="aiPreviewZoomOut">-</button>
+          <button id="aiPreviewZoomIn">+</button>
+          <button id="aiPreviewMax">最大化</button>
           <button id="aiPreviewClose" class="ai-preview-close">×</button>
         </div>
       </div>
-      <div class="ai-preview-body">
+      <div id="aiPreviewPrompt" class="ai-preview-prompt hidden">
+        <div id="aiPreviewPromptText" class="ai-preview-prompt-text"></div>
+        <button id="aiPreviewCopyPrompt" class="ai-preview-prompt-copy">复制提示词</button>
+      </div>
+      <div id="aiPreviewBody" class="ai-preview-body">
         <img id="aiPreviewImg" alt="预览">
       </div>
     </div>

@@ -25,3 +25,12 @@ All notable changes to this project will be documented in this file.
 - Feature picker tiles tightened to smaller squares with larger icons; V1/V2 badges removed.
 - Feature panel now overlays without horizontal scrolling, and avoids covering the “立即生成” button.
 - Text assistant layout adjusted: inputs taller, insert button sits above generate in text mode.
+
+## [1.0.3] - 2026-02-01
+### Updated
+- AI results now render incrementally (first image shows immediately), with per-image progress preserved.
+- History entry is always accessible from the result header (no need to generate first).
+- Preview and history UX refined (prompt copy, improved z-index layering).
+### Fixed
+- History close (X/backdrop/ESC).
+- History thumbnails no longer crop tall images (contain).

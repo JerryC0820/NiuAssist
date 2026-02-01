@@ -1234,8 +1234,7 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 
 #aiImageInsertMode,
 #aiImageCount,
-#aiImageSizeSelect,
-#aiImageSizeCustom,
+#aiImageSizeInput,
 #aiPythonMaxSide,
 #aiPythonQuality {
   flex: 1 1 110px;
@@ -1246,10 +1245,6 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 #aiPythonMaxSide,
 #aiPythonQuality {
   text-align: center;
-}
-
-#aiImageSizeSelect.hidden {
-  display: none;
 }
 
 .ai-row.inline.ai-image-only {
@@ -1338,12 +1333,71 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   white-space: nowrap;
 }
 
-.ai-size-custom {
-  max-width: 120px;
+.ai-size-picker {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: visible;
 }
 
-.ai-size-custom.hidden {
+.ai-size-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-size-toggle {
+  width: 30px;
+  height: 32px;
+  border: 1px solid #2a2a2a;
+  background: #141414;
+  color: #d6d6d6;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ai-size-toggle:hover {
+  border-color: rgba(46, 167, 255, 0.6);
+}
+
+.ai-size-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 6px;
+  max-height: min(70vh, 520px);
+  overflow: auto;
+  z-index: 40;
+  pointer-events: auto;
+  z-index: 60;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.ai-size-panel.hidden {
   display: none;
+}
+
+.ai-size-option {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #dedede;
+  cursor: pointer;
+}
+
+.ai-size-option:hover {
+  background: #1d1d1d;
+}
+
+.ai-size-option.selected {
+  background: rgba(46, 167, 255, 0.15);
+  border: 1px solid rgba(46, 167, 255, 0.4);
 }
 
 .ai-save {
@@ -1390,11 +1444,29 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 .ai-status.err { color: var(--danger); }
 .ai-status.warn { color: #ffb74d; }
 
-.ai-result-title {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 6px;
-}
+  .ai-result-title {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 0;
+  }
+
+  .ai-result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+
+  .ai-result-history {
+    border: 1px solid var(--line);
+    background: #2a2a2a;
+    color: #d7dbe2;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
 
 .ai-result {
   display: flex;
@@ -1495,12 +1567,51 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   padding: 2px 6px;
 }
 
+.ai-result-progress {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+  color: #e6e6e6;
+  font-size: 11px;
+}
+
+.ai-result-progress.hidden {
+  display: none;
+}
+
+.ai-progress-ring {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+.ai-result-item {
+  --thumb-ratio: 1 / 1;
+}
+
 .ai-result-thumb {
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: var(--thumb-ratio, 1 / 1);
   border-radius: 8px;
-  object-fit: cover;
-  background: #2a2a2a;
+  object-fit: contain;
+  background: #1f1f1f;
+}
+
+.ai-result-thumb.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .ai-result-grid.single .ai-result-thumb {
@@ -1523,7 +1634,7 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 .ai-preview {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 230;
   display: none;
   align-items: center;
   justify-content: center;
@@ -1550,6 +1661,11 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.ai-preview-card.is-max {
+  width: 96vw;
+  height: 94vh;
 }
 
 .ai-history {
@@ -1655,14 +1771,31 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
 }
 
 .ai-history-thumb {
   width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: cover;
+  aspect-ratio: var(--thumb-ratio, 1 / 1);
   border-radius: 8px;
   background: #2a2a2a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.ai-history-thumb.missing {
+  background: #1c1c1c;
+  border: 1px dashed #2d2d2d;
 }
 
 .ai-history-meta {
@@ -1680,6 +1813,32 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 
 .ai-history-actions button {
   flex: 1;
+}
+
+.ai-history-tip {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 6px;
+  color: #eaeaea;
+  font-size: 11px;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-history-item:hover .ai-history-tip {
+  display: flex;
+}
+
+.ai-history-tip button {
+  align-self: flex-end;
+  font-size: 10px;
+  padding: 2px 6px;
 }
 
 .ai-history-text {
@@ -1723,11 +1882,51 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   gap: 6px;
 }
 
-.ai-preview-close {
+.ai-preview-actions button {
   background: #2a2a2a;
   border: 1px solid #3a3a3a;
   border-radius: 6px;
   color: #e6e6e6;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.ai-preview-actions button:hover {
+  border-color: rgba(46, 167, 255, 0.6);
+}
+
+.ai-preview-close {
+  font-weight: 700;
+}
+
+.ai-preview-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #262626;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ai-preview-prompt-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-preview-prompt-copy {
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #e6e6e6;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
 }
 
 .ai-preview-body {
@@ -1738,6 +1937,14 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   align-items: center;
   justify-content: center;
   background: #121212;
+}
+
+.ai-preview-body.is-pan {
+  cursor: grab;
+}
+
+.ai-preview-body.is-pan.dragging {
+  cursor: grabbing;
 }
 
 .ai-preview-body img {

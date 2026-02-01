@@ -1108,11 +1108,13 @@
       var openBtn = document.createElement('button');
       openBtn.textContent = '打开';
       openBtn.addEventListener('click', function () {
-        if (!insertPath || !fileExists(insertPath)) {
-          setAiStatus('本地文件不存在。', 'err');
-          return;
-        }
-        openFileInExplorer(insertPath);
+        ensureHistoryLocalFile(rec, function (path) {
+          if (!path || !fileExists(path)) {
+            setAiStatus('本地文件不存在。', 'err');
+            return;
+          }
+          openFileInExplorer(path);
+        });
       });
       actions.appendChild(openBtn);
       card.appendChild(actions);
@@ -1188,26 +1190,165 @@
     aiHistoryEl.classList.remove('open');
   }
 
-  function copyToClipboard(text) {
+  function copyToClipboard(text, cb) {
     var value = text || '';
-    if (!value) return;
+    if (!value) {
+      if (cb) cb(false);
+      return;
+    }
+    var finished = false;
+    function finish(ok) {
+      if (finished) return;
+      finished = true;
+      if (cb) cb(ok);
+      setAiStatus(ok ? '提示词已复制。' : '复制失败。', ok ? 'ok' : 'err');
+    }
+    function tryNodeClipboard() {
+      try {
+        var mods = getNodeModules();
+        if (!mods || !mods.child_process || !mods.fs || !mods.path || !mods.os) return false;
+        var tmp = mods.path.join(mods.os.tmpdir(), 'niuassist_clip_' + Date.now() + '.txt');
+        mods.fs.writeFileSync(tmp, value, 'utf8');
+        if (typeof process !== 'undefined' && process.platform === 'darwin') {
+          mods.child_process.exec('pbcopy < "' + tmp + '"', function (err) {
+            finish(!err);
+          });
+          return true;
+        }
+        mods.child_process.exec('cmd /c type "' + tmp + '" | clip', function (err) {
+          finish(!err);
+        });
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
     try {
       if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(value);
+        navigator.clipboard.writeText(value).then(function () {
+          finish(true);
+        }).catch(function () {
+          var ok = false;
+          try {
+            var area = document.createElement('textarea');
+            area.value = value;
+            area.setAttribute('readonly', 'readonly');
+            area.style.position = 'fixed';
+            area.style.left = '-9999px';
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+            ok = document.execCommand('copy');
+            document.body.removeChild(area);
+          } catch (e2) {}
+          if (ok) {
+            finish(true);
+          } else if (!tryNodeClipboard()) {
+            finish(false);
+          }
+        });
         return;
       }
     } catch (e) {}
     try {
-      var area = document.createElement('textarea');
-      area.value = value;
-      area.style.position = 'fixed';
-      area.style.left = '-9999px';
-      document.body.appendChild(area);
-      area.focus();
-      area.select();
-      document.execCommand('copy');
-      document.body.removeChild(area);
+      var area2 = document.createElement('textarea');
+      area2.value = value;
+      area2.setAttribute('readonly', 'readonly');
+      area2.style.position = 'fixed';
+      area2.style.left = '-9999px';
+      document.body.appendChild(area2);
+      area2.focus();
+      area2.select();
+      var ok2 = document.execCommand('copy');
+      document.body.removeChild(area2);
+      if (ok2) {
+        finish(true);
+        return;
+      }
+    } catch (e3) {}
+    if (!tryNodeClipboard()) finish(false);
+  }
+
+  function updateHistoryRecord(rec, patch) {
+    if (!rec || !rec.id || !patch) return;
+    var mods = getNodeModules();
+    if (!mods || !mods.fs) return;
+    try {
+      var metaDir = getAiCacheMetaDir();
+      if (metaDir) {
+        var metaPath = mods.path.join(metaDir, rec.id + '.json');
+        var current = {};
+        if (mods.fs.existsSync(metaPath)) {
+          try { current = JSON.parse(mods.fs.readFileSync(metaPath, 'utf8')) || {}; } catch (e) {}
+        }
+        Object.keys(patch).forEach(function (k) { current[k] = patch[k]; });
+        mods.fs.writeFileSync(metaPath, JSON.stringify(current, null, 2), 'utf8');
+      }
+    } catch (e1) {}
+    try {
+      var indexPath = getAiHistoryIndexPath();
+      if (!indexPath || !mods.fs.existsSync(indexPath)) return;
+      var content = mods.fs.readFileSync(indexPath, 'utf8');
+      var lines = content.split(/\r?\n/).filter(function (l) { return l.trim(); });
+      var updated = false;
+      var out = lines.map(function (line) {
+        try {
+          var obj = JSON.parse(line);
+          if (obj && obj.id === rec.id) {
+            Object.keys(patch).forEach(function (k) { obj[k] = patch[k]; });
+            updated = true;
+            return JSON.stringify(obj);
+          }
+        } catch (e) {}
+        return line;
+      });
+      if (updated) {
+        var text = out.join('\n');
+        if (text) text += '\n';
+        mods.fs.writeFileSync(indexPath, text, 'utf8');
+      }
     } catch (e2) {}
+  }
+
+  function ensureHistoryLocalFile(rec, cb) {
+    var mods = getNodeModules();
+    var fs = mods && mods.fs ? mods.fs : null;
+    function fileExists(p) {
+      try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
+    }
+    var localPath = rec && (rec.localPath || rec.insertPath) || '';
+    var rawPath = rec && rec.rawPath || '';
+    if (fileExists(localPath)) {
+      if (cb) cb(localPath);
+      return;
+    }
+    if (fileExists(rawPath)) {
+      if (cb) cb(rawPath);
+      return;
+    }
+    if (!rec || !rec.url) {
+      if (cb) cb('');
+      return;
+    }
+    var dir = getAiCacheDir();
+    if (!dir) {
+      if (cb) cb('');
+      return;
+    }
+    var ext = extractExtFromUrl(rec.url, 'png');
+    var base = rec.id || ('img_' + Date.now());
+    var outPath = dir + '/' + base + '.' + ext;
+    setAiStatus('正在下载历史图片...', '');
+    downloadUrlToFile(rec.url, outPath, function (err) {
+      if (err) {
+        setAiStatus('历史图片下载失败：' + err, 'err');
+        if (cb) cb('');
+        return;
+      }
+      updateHistoryRecord(rec, { localPath: outPath, rawPath: outPath, insertPath: outPath });
+      setAiStatus('历史图片已补全。', 'ok');
+      if (cb) cb(outPath);
+    });
   }
 
   function placeFileByPath(path, info) {

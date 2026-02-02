@@ -1,0 +1,814 @@
+编号: 003
+时间: 20260202-123736
+概述: 右键菜单宽度自适应(仅略宽于最长文本)；结果区支持右键菜单；补 result 本地落盘保障；历史路径归一化；新增结果润色快捷；修复相册/历史路径相对导致缺失。
+用户提示词/需求: 右键菜单不要太宽；结果界面也要右键菜单；缓存位置固定 D:\\software\\Adobe\\Adobe Photoshop 2025\\invalidParam\\NiuAssistCache；按顺序生成diff。
+---DIFF---
+diff --git a/css/style.css b/css/style.css
+index 33931c0..405eb52 100644
+--- a/css/style.css
++++ b/css/style.css
+@@ -1653,13 +1653,26 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
+ 
+ .ai-result-meta {
+   display: flex;
+-  align-items: center;
+-  justify-content: space-between;
++  flex-direction: column;
++  align-items: flex-start;
++  gap: 2px;
++  font-size: 11px;
++  color: var(--muted);
++  min-width: 0;
++}
++
++.ai-result-name {
+   font-size: 11px;
+   color: var(--muted);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
++  width: 100%;
++}
++
++.ai-result-size {
++  font-size: 10px;
++  color: #7a7a7a;
+ }
+ 
+ .ai-preview {
+@@ -1881,11 +1894,26 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
+ }
+ 
+ .ai-history-meta {
++  font-size: 11px;
++  color: var(--muted);
++  display: flex;
++  flex-direction: column;
++  gap: 2px;
++  min-width: 0;
++}
++
++.ai-history-name {
+   font-size: 11px;
+   color: var(--muted);
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
++  width: 100%;
++}
++
++.ai-history-size {
++  font-size: 10px;
++  color: #7a7a7a;
+ }
+ 
+ .ai-history-actions {
+@@ -2028,6 +2056,15 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
+   cursor: pointer;
+ }
+ 
++.ai-preview-actions button.preview-nav {
++  min-width: 34px;
++}
++
++.ai-preview-actions button.preview-nav[disabled] {
++  opacity: 0.4;
++  cursor: default;
++}
++
+ .ai-preview-actions button:hover {
+   border-color: rgba(46, 167, 255, 0.6);
+ }
+@@ -2460,7 +2497,9 @@ body.ai-type-text .ai-config-section {
+ 
+ .ai-context-menu {
+   position: fixed;
+-  min-width: 180px;
++  width: max-content;
++  min-width: 140px;
++  max-width: 320px;
+   background: #1d1d1d;
+   border: 1px solid #2b2b2b;
+   border-radius: 10px;
+@@ -2479,6 +2518,7 @@ body.ai-type-text .ai-config-section {
+   border-radius: 8px;
+   font-size: 12px;
+   cursor: pointer;
++  white-space: nowrap;
+ }
+ 
+ .ai-context-menu button:hover {
+diff --git a/index.html b/index.html
+index a760f8e..af83d49 100644
+--- a/index.html
++++ b/index.html
+@@ -236,6 +236,8 @@
+           <button id="aiPreview400">400%</button>
+           <button id="aiPreviewZoomOut">-</button>
+           <button id="aiPreviewZoomIn">+</button>
++          <button id="aiPreviewPrev">◀</button>
++          <button id="aiPreviewNext">▶</button>
+           <button id="aiPreviewMax">最大化</button>
+           <button id="aiPreviewClose" class="ai-preview-close">×</button>
+         </div>
+diff --git a/js/main.js b/js/main.js
+index 45ef223..8a7bdda 100644
+--- a/js/main.js
++++ b/js/main.js
+@@ -232,6 +232,8 @@
+   var aiPreview400Btn = document.getElementById('aiPreview400');
+   var aiPreviewZoomOutBtn = document.getElementById('aiPreviewZoomOut');
+   var aiPreviewZoomInBtn = document.getElementById('aiPreviewZoomIn');
++  var aiPreviewPrevBtn = document.getElementById('aiPreviewPrev');
++  var aiPreviewNextBtn = document.getElementById('aiPreviewNext');
+   var aiPreviewMaxBtn = document.getElementById('aiPreviewMax');
+   var aiPreviewBody = document.getElementById('aiPreviewBody');
+   var aiPreviewPromptEl = document.getElementById('aiPreviewPrompt');
+@@ -301,6 +303,9 @@
+   var aiPreviewScale = 1;
+   var aiPreviewTranslateX = 0;
+   var aiPreviewTranslateY = 0;
++  var aiPreviewList = [];
++  var aiPreviewIndex = -1;
++  var aiPreviewWheelLock = 0;
+   var AI_PREVIEW_MIN_SCALE = 0.25;
+   var AI_PREVIEW_MAX_SCALE = 4;
+   var aiHistoryIsMax = false;
+@@ -308,6 +313,7 @@
+   var aiPreviewIsMax = false;
+   var aiPreviewDrag = { active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 };
+   var aiHistoryRecordMap = {};
++  var aiHistoryImageRecords = [];
+   var aiHistoryPromptOpenCard = null;
+   var aiContextMenu = null;
+   var AI_ALBUM_SIZE_KEY = 'niuassist_album_thumb';
+@@ -613,9 +619,25 @@
+     } catch (e) {
+       base = '';
+     }
++    try {
++      if (!base) {
++        var fallbackHost = 'D:\\software\\Adobe\\Adobe Photoshop 2025';
++        if (mods.fs && mods.fs.existsSync(fallbackHost)) base = fallbackHost;
++      }
++    } catch (e0) {}
+     var dir = '';
+     try {
+       if (base) {
++        try {
++          if (mods.fs && mods.fs.existsSync(base)) {
++            var stat = mods.fs.statSync(base);
++            if (stat && stat.isFile && stat.isFile()) {
++              base = mods.path.dirname(base);
++            }
++          } else if (/\.exe$/i.test(base)) {
++            base = mods.path.dirname(base);
++          }
++        } catch (e1) {}
+         dir = mods.path.join(base, 'invalidParam', 'NiuAssistCache');
+       } else {
+         dir = mods.path.join(extPath, 'cache');
+@@ -629,6 +651,19 @@
+     return aiCacheRoot;
+   }
+ 
++  function normalizeCachePath(p) {
++    if (!p) return '';
++    var mods = getNodeModules();
++    if (!mods || !mods.path) return p;
++    try {
++      if (mods.path.isAbsolute(p)) return p;
++    } catch (e) {}
++    var root = getAiCacheRoot();
++    if (!root) return p;
++    var cleaned = String(p).replace(/^invalidParam[\\/]+NiuAssistCache[\\/]+/i, '');
++    return mods.path.join(root, cleaned);
++  }
++
+   function getAiCacheDir() {
+     if (aiCacheDir) return aiCacheDir;
+     var mods = getNodeModules();
+@@ -717,7 +752,14 @@
+   function queueAiCache(items, settings) {
+     if (!items || !items.length) return;
+     var dir = getAiCacheDir();
+-    if (!dir) return;
++    if (!dir) {
++      items.forEach(function (item) {
++        if (!item || !item.id) return;
++        item.progress = 100;
++        updateAiJobProgress(item.id, item.progress);
++      });
++      return;
++    }
+     var now = Date.now();
+     var usePython = !!(settings && settings.aiPythonSpeed);
+     var maxSide = parseInt((settings && settings.aiPythonMaxSide) || 2000, 10);
+@@ -957,13 +999,45 @@
+     var mods = getNodeModules();
+     if (!mods || !mods.fs) return [];
+     var indexPath = getAiHistoryIndexPath();
+-    if (!indexPath || !mods.fs.existsSync(indexPath)) return [];
++    var items = [];
++    if (indexPath && mods.fs.existsSync(indexPath)) {
++      try {
++        var text = mods.fs.readFileSync(indexPath, 'utf8');
++        var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
++        items = lines.map(function (line) {
++          try { return JSON.parse(line); } catch (e) { return null; }
++        }).filter(Boolean);
++      } catch (e) {
++        items = [];
++      }
++    }
++    if (!items.length) {
++      var metaDir = getAiCacheMetaDir();
++      try {
++        if (metaDir && mods.fs.existsSync(metaDir)) {
++          var files = mods.fs.readdirSync(metaDir).filter(function (name) {
++            return name && name.toLowerCase().endsWith('.json') && name.toLowerCase() !== 'index.jsonl';
++          });
++          items = files.map(function (name) {
++            try {
++              var content = mods.fs.readFileSync(mods.path.join(metaDir, name), 'utf8');
++              return JSON.parse(content);
++            } catch (e) { return null; }
++          }).filter(Boolean);
++        }
++      } catch (e2) {
++        items = [];
++      }
++      if (items.length && indexPath) {
++        try {
++          var outLines = items.slice().reverse().map(function (it) { return JSON.stringify(it); }).join('\n');
++          if (outLines) outLines += '\n';
++          mods.fs.writeFileSync(indexPath, outLines, 'utf8');
++        } catch (e3) {}
++      }
++    }
++    if (!items.length) return [];
+     try {
+-      var text = mods.fs.readFileSync(indexPath, 'utf8');
+-      var lines = text.split(/\r?\n/).filter(function (l) { return l.trim(); });
+-      var items = lines.map(function (line) {
+-        try { return JSON.parse(line); } catch (e) { return null; }
+-      }).filter(Boolean);
+       return items.reverse();
+     } catch (e) {
+       return [];
+@@ -1016,15 +1090,11 @@
+     if (!aiHistoryImagesEl) return;
+     aiHistoryImagesEl.innerHTML = '';
+     aiHistoryRecordMap = {};
++    aiHistoryImageRecords = records ? records.slice() : [];
+     if (!records.length) {
+       aiHistoryImagesEl.innerHTML = '<div class="ai-text">暂无图片历史</div>';
+       return;
+     }
+-    var mods = getNodeModules();
+-    var fs = mods && mods.fs ? mods.fs : null;
+-    function fileExists(p) {
+-      try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
+-    }
+     records.forEach(function (rec) {
+       if (rec && rec.id) aiHistoryRecordMap[rec.id] = rec;
+       var card = document.createElement('div');
+@@ -1032,19 +1102,9 @@
+       if (rec && rec.id) card.dataset.recordId = rec.id;
+       var thumb = document.createElement('div');
+       thumb.className = 'ai-history-thumb';
+-      var localPath = rec.localPath || rec.insertPath || '';
+-      var rawPath = rec.rawPath || '';
+-      var showUrl = '';
+-      var insertPath = '';
+-      if (fileExists(localPath)) {
+-        showUrl = formatFileUrl(localPath);
+-        insertPath = localPath;
+-      } else if (fileExists(rawPath)) {
+-        showUrl = formatFileUrl(rawPath);
+-        insertPath = rawPath;
+-      } else if (rec.url) {
+-        showUrl = rec.url;
+-      }
++      var resolved = resolveHistorySource(rec);
++      var showUrl = resolved.url || '';
++      var insertPath = resolved.localPath || '';
+       function markMissing() {
+         thumb.classList.add('missing');
+         thumb.textContent = '已过期';
+@@ -1055,12 +1115,25 @@
+         img.addEventListener('dblclick', function (ev) {
+           if (ev && ev.stopPropagation) ev.stopPropagation();
+           if (!showUrl) return;
+-          openAiPreview({ url: showUrl, localPath: insertPath, prompt: rec.prompt, recordId: rec.id });
++          var list = buildHistoryPreviewList();
++          var idx = -1;
++          for (var k = 0; k < list.length; k += 1) {
++            if (rec.id && list[k].recordId === rec.id) { idx = k; break; }
++          }
++          if (idx < 0) idx = 0;
++          openAiPreviewWithList(list, idx);
+         });
+         img.addEventListener('error', function () {
+           if (img && img.parentNode) img.parentNode.removeChild(img);
+           markMissing();
+         });
++        img.addEventListener('load', function () {
++          var w = img.naturalWidth || img.width || 0;
++          var h = img.naturalHeight || img.height || 0;
++          if (w > 0 && h > 0) {
++            updateCardSizeByDims(card, '.ai-history-size', w, h);
++          }
++        });
+         thumb.appendChild(img);
+       } else {
+         markMissing();
+@@ -1111,7 +1184,14 @@
+       card.appendChild(thumb);
+       var meta = document.createElement('div');
+       meta.className = 'ai-history-meta';
+-      meta.textContent = rec.model || rec.size || '图片';
++      var name = document.createElement('div');
++      name.className = 'ai-history-name';
++      name.textContent = rec.model || '图片';
++      meta.appendChild(name);
++      var sizeEl = document.createElement('div');
++      sizeEl.className = 'ai-history-size';
++      sizeEl.textContent = extractSizeText(rec.size || '') || '';
++      meta.appendChild(sizeEl);
+       card.appendChild(meta);
+       aiHistoryImagesEl.appendChild(card);
+     });
+@@ -1243,7 +1323,7 @@
+         });
+         return;
+       }
+-      var cmd = 'powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $img=[System.Drawing.Image]::FromFile(\\'' + safe + '\\'); [System.Windows.Forms.Clipboard]::SetImage($img)"';
++      var cmd = "powershell -NoProfile -Command \"Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $img=[System.Drawing.Image]::FromFile('" + safe + "'); [System.Windows.Forms.Clipboard]::SetImage($img)\"";
+       mods.child_process.exec(cmd, function (err) {
+         if (cb) cb(!err);
+       });
+@@ -1289,7 +1369,13 @@
+       { label: '打开预览', onClick: function () {
+         var url = showUrl || rec.url || '';
+         if (!url) return;
+-        openAiPreview({ url: url, localPath: insertPath, prompt: prompt, recordId: rec.id });
++        var list = buildHistoryPreviewList();
++        var idx = -1;
++        for (var k = 0; k < list.length; k += 1) {
++          if (rec.id && list[k].recordId === rec.id) { idx = k; break; }
++        }
++        if (idx < 0) idx = 0;
++        openAiPreviewWithList(list, idx);
+       }},
+       { label: '导入为新图层', onClick: function () {
+         var item = { url: rec.url || showUrl, localPath: insertPath || '' };
+@@ -1341,6 +1427,68 @@
+     openAiContextMenu(items, x, y);
+   }
+ 
++  function openResultContextMenu(item, x, y) {
++    if (!item) return;
++    var prompt = item.prompt || '';
++    var items = [
++      { label: '打开预览', onClick: function () {
++        var list = buildResultPreviewList();
++        var idx = -1;
++        for (var k = 0; k < list.length; k += 1) {
++          if (item.id && list[k].id === item.id) { idx = k; break; }
++          if (!item.id && list[k].url === item.url) { idx = k; break; }
++        }
++        if (idx < 0) idx = 0;
++        openAiPreviewWithList(list, idx);
++      } },
++      { label: '导入为新图层', onClick: function () { insertAiImageUrl(item, 'insert'); } },
++      { label: '替换当前图层', onClick: function () {
++        ensureResultLocalFile(item, function (path) {
++          replaceImageFromPath(path, item.url || '');
++        });
++      } },
++      { label: '打开为新文档', onClick: function () {
++        ensureResultLocalFile(item, function (path) {
++          if (!path) {
++            setAiStatus('本地文件不存在。', 'err');
++            return;
++          }
++          openImageAsNewDocument(path);
++        });
++      } },
++      { label: '复制', onClick: function () {
++        ensureResultLocalFile(item, function (path) {
++          if (!path) {
++            setAiStatus('本地文件不存在。', 'err');
++            return;
++          }
++          copyImageToClipboard(path, function (ok) {
++            setAiStatus(ok ? '已复制图片。' : '复制失败。', ok ? 'ok' : 'err');
++          });
++        });
++      } },
++      { label: '打开所在文件夹', onClick: function () {
++        ensureResultLocalFile(item, function (path) {
++          if (!path) {
++            setAiStatus('本地文件不存在。', 'err');
++            return;
++          }
++          openFileInExplorer(path);
++        });
++      } },
++      { type: 'sep' },
++      { label: '复制提示词', onClick: function () {
++        copyToClipboard(prompt, function (ok) {
++          if (ok) setAiStatus('提示词已复制。', 'ok');
++        });
++      } },
++      { label: '提示词润色并应用', onClick: function () {
++        openPromptPolishFromResult(item);
++      } }
++    ];
++    openAiContextMenu(items, x, y);
++  }
++
+   function openPreviewContextMenu(item, x, y) {
+     if (!item) return;
+     var prompt = item.prompt || '';
+@@ -1352,7 +1500,24 @@
+       cb('');
+     }
+     var items = [
+-      { label: '打开预览', onClick: function () { openAiPreview(item); } },
++      { label: '打开预览', onClick: function () {
++        var list = [];
++        var idx = -1;
++        if (item.recordId) {
++          list = buildHistoryPreviewList();
++          for (var k = 0; k < list.length; k += 1) {
++            if (list[k].recordId === item.recordId) { idx = k; break; }
++          }
++        } else {
++          list = buildResultPreviewList();
++          for (var j = 0; j < list.length; j += 1) {
++            if (item.id && list[j].id === item.id) { idx = j; break; }
++            if (!item.id && list[j].url === item.url) { idx = j; break; }
++          }
++        }
++        if (idx < 0) idx = 0;
++        openAiPreviewWithList(list, idx);
++      } },
+       { label: '导入为新图层', onClick: function () { insertAiImageUrl(item, 'insert'); } },
+       { label: '替换当前图层', onClick: function () {
+         resolveLocal(function (path) {
+@@ -1439,6 +1604,114 @@
+     }, ms || 900);
+   }
+ 
++  function extractSizeText(value) {
++    if (!value) return '';
++    var m = String(value).match(/(\d+)\s*x\s*(\d+)/i);
++    if (!m) return '';
++    return m[1] + 'x' + m[2];
++  }
++
++  function formatSizeText(w, h) {
++    if (!w || !h) return '';
++    return Math.round(w) + 'x' + Math.round(h);
++  }
++
++  function updateCardSizeText(card, selector, text) {
++    if (!card || !selector) return;
++    var el = card.querySelector(selector);
++    if (!el) return;
++    el.textContent = text || '';
++  }
++
++  function updateCardSizeByDims(card, selector, w, h) {
++    var text = formatSizeText(w, h);
++    if (text) updateCardSizeText(card, selector, text);
++  }
++
++  function resolveHistorySource(rec) {
++    var mods = getNodeModules();
++    var fs = mods && mods.fs ? mods.fs : null;
++    function fileExists(p) {
++      try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
++    }
++    var localPath = normalizeCachePath(rec && (rec.localPath || rec.insertPath) || '');
++    var rawPath = normalizeCachePath(rec && rec.rawPath || '');
++    if (fileExists(localPath)) return { url: formatFileUrl(localPath), localPath: localPath };
++    if (fileExists(rawPath)) return { url: formatFileUrl(rawPath), localPath: rawPath };
++    if (rec && rec.url) return { url: rec.url, localPath: '' };
++    return { url: '', localPath: '' };
++  }
++
++  function buildHistoryPreviewList() {
++    var list = [];
++    if (!aiHistoryImageRecords || !aiHistoryImageRecords.length) return list;
++    aiHistoryImageRecords.forEach(function (rec) {
++      var src = resolveHistorySource(rec);
++      if (!src.url) return;
++      list.push({
++        url: src.url,
++        localPath: src.localPath || '',
++        prompt: rec.prompt || '',
++        recordId: rec.id || '',
++        size: rec.size || ''
++      });
++    });
++    return list;
++  }
++
++  function buildResultPreviewList() {
++    var list = [];
++    if (!aiGeneratedImages || !aiGeneratedImages.length) return list;
++    aiGeneratedImages.forEach(function (item) {
++      if (!item) return;
++      var src = '';
++      if (item.localPath) src = formatFileUrl(item.localPath);
++      else if (item.url) src = item.url;
++      if (!src) return;
++      list.push({
++        url: src,
++        localPath: item.localPath || '',
++        prompt: item.prompt || '',
++        size: item.size || '',
++        id: item.id || ''
++      });
++    });
++    return list;
++  }
++
++  function updatePreviewNav() {
++    var total = aiPreviewList ? aiPreviewList.length : 0;
++    if (aiPreviewPrevBtn) aiPreviewPrevBtn.disabled = (total <= 1 || aiPreviewIndex <= 0);
++    if (aiPreviewNextBtn) aiPreviewNextBtn.disabled = (total <= 1 || aiPreviewIndex >= total - 1);
++    if (aiPreviewTitle) {
++      if (total > 1 && aiPreviewIndex >= 0) {
++        aiPreviewTitle.textContent = '预览 (' + (aiPreviewIndex + 1) + '/' + total + ')';
++      } else {
++        aiPreviewTitle.textContent = '预览';
++      }
++    }
++  }
++
++  function openAiPreviewWithList(list, index) {
++    aiPreviewList = Array.isArray(list) ? list.slice() : [];
++    if (!aiPreviewList.length) {
++      aiPreviewIndex = -1;
++      return;
++    }
++    aiPreviewIndex = Math.max(0, Math.min(index || 0, aiPreviewList.length - 1));
++    updatePreviewNav();
++    openAiPreview(aiPreviewList[aiPreviewIndex]);
++  }
++
++  function navigatePreview(step) {
++    if (!aiPreviewList || aiPreviewList.length <= 1) return;
++    var next = aiPreviewIndex + step;
++    if (next < 0 || next >= aiPreviewList.length) return;
++    aiPreviewIndex = next;
++    updatePreviewNav();
++    openAiPreview(aiPreviewList[aiPreviewIndex]);
++  }
++
+   function copyToClipboard(text, cb) {
+     var value = text || '';
+     if (!value) {
+@@ -1574,8 +1847,8 @@
+     function fileExists(p) {
+       try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
+     }
+-    var localPath = rec && (rec.localPath || rec.insertPath) || '';
+-    var rawPath = rec && rec.rawPath || '';
++    var localPath = normalizeCachePath(rec && (rec.localPath || rec.insertPath) || '');
++    var rawPath = normalizeCachePath(rec && rec.rawPath || '');
+     if (fileExists(localPath)) {
+       if (cb) cb(localPath);
+       return;
+@@ -1609,6 +1882,45 @@
+     });
+   }
+ 
++  function ensureResultLocalFile(item, cb) {
++    if (!item) {
++      if (cb) cb('');
++      return;
++    }
++    var mods = getNodeModules();
++    var fs = mods && mods.fs ? mods.fs : null;
++    function fileExists(p) {
++      try { return !!(fs && p && fs.existsSync(p)); } catch (e) { return false; }
++    }
++    var localPath = normalizeCachePath(item.localPath || '');
++    if (fileExists(localPath)) {
++      if (cb) cb(localPath);
++      return;
++    }
++    if (!item.url) {
++      if (cb) cb('');
++      return;
++    }
++    var dir = getAiCacheDir();
++    if (!dir) {
++      if (cb) cb('');
++      return;
++    }
++    var ext = extractExtFromUrl(item.url, 'png');
++    var base = item.id || ('img_' + Date.now());
++    var outPath = dir + '/' + base + '.' + ext;
++    setAiStatus('正在缓存素材...', '');
++    downloadUrlToFile(item.url, outPath, function (err) {
++      if (err) {
++        setAiStatus('缓存失败：' + err, 'err');
++        if (cb) cb('');
++        return;
++      }
++      item.localPath = outPath;
++      if (cb) cb(outPath);
++    });
++  }
++
+   function placeFileByPath(path, info) {
+     if (!path) return;
+     var script = 'psexCapture_placeFileByPath(' + JSON.stringify(path) + ');';
+@@ -1772,6 +2084,24 @@
+     return panel;
+   }
+ 
++  function openPromptPolishFromResult(item) {
++    if (!item || !item.prompt) {
++      setAiStatus('没有可润色的提示词。', 'warn');
++      return;
++    }
++    var textModels = AI_MODEL_DEFAULTS.filter(function (m) { return m.type === 'text'; });
++    if (!textModels.length) {
++      setAiStatus('无可用文本模型。', 'err');
++      return;
++    }
++    var modelId = textModels[0].id;
++    requestPromptPolish(item.prompt, modelId, 'medium', 'pro', function (result) {
++      if (!result) return;
++      if (aiPromptInput) aiPromptInput.value = result;
++      setAiStatus('已写入提示词。', 'ok');
++    });
++  }
++
+   function requestPromptPolish(prompt, modelId, strength, target, cb) {
+     var settings = getAiSettings();
+     if (!settings.apiKey) {
+@@ -3630,6 +3960,18 @@
+       src = formatFileUrl(previewItem.localPath);
+     }
+     aiPreviewItem = Object.assign({}, previewItem, { url: src });
++    if (!aiPreviewList || !aiPreviewList.length) {
++      aiPreviewList = [aiPreviewItem];
++      aiPreviewIndex = 0;
++    } else {
++      for (var i = 0; i < aiPreviewList.length; i += 1) {
++        var it = aiPreviewList[i];
++        if (!it) continue;
++        if (aiPreviewItem.recordId && it.recordId === aiPreviewItem.recordId) { aiPreviewIndex = i; break; }
++        if (aiPreviewItem.id && it.id === aiPreviewItem.id) { aiPreviewIndex = i; break; }
++        if (it.url === aiPreviewItem.url) { aiPreviewIndex = i; break; }
++      }
++    }
+     updatePreviewPrompt(previewItem);
+     aiPreviewImg.onload = function () {
+       if (aiPreviewMode === 'fit') setAiPreviewMode('fit');
+@@ -3647,6 +3989,7 @@
+       aiPreviewMaxBtn.textContent = aiPreviewIsMax ? '还原' : '最大化';
+     }
+     aiPreviewEl.classList.add('open');
++    updatePreviewNav();
+   }
+ 
+   function closeAiPreview() {
+@@ -3814,13 +4157,20 @@
+         var h = img.naturalHeight || img.height || 0;
+         if (w > 0 && h > 0) {
+           card.style.setProperty('--thumb-ratio', w + ' / ' + h);
++          updateCardSizeByDims(card, '.ai-result-size', w, h);
+         }
+       });
+-      img.addEventListener('dblclick', function (ev) {
+-        if (ev && ev.stopPropagation) ev.stopPropagation();
+-        selectAiImage(item.id);
+-        openAiPreview(item);
+-      });
++        img.addEventListener('dblclick', function (ev) {
++          if (ev && ev.stopPropagation) ev.stopPropagation();
++          selectAiImage(item.id);
++          var list = buildResultPreviewList();
++          var idx = -1;
++          for (var k = 0; k < list.length; k += 1) {
++            if (item.id && list[k].id === item.id) { idx = k; break; }
++          }
++          if (idx < 0) idx = 0;
++          openAiPreviewWithList(list, idx);
++        });
+       var placeholder = card.querySelector('.ai-result-thumb.placeholder');
+       if (placeholder && placeholder.parentNode) {
+         placeholder.parentNode.removeChild(placeholder);
+@@ -3987,12 +4337,20 @@
+             var h = img.naturalHeight || img.height || 0;
+             if (w > 0 && h > 0) {
+               card.style.setProperty('--thumb-ratio', w + ' / ' + h);
++              updateCardSizeByDims(card, '.ai-result-size', w, h);
+             }
+           });
+           img.addEventListener('dblclick', function (ev) {
+             if (ev && ev.stopPropagation) ev.stopPropagation();
+             selectAiImage(item.id);
+-            openAiPreview(item);
++            var list = buildResultPreviewList();
++            var idx = -1;
++            for (var k = 0; k < list.length; k += 1) {
++              if (list[k].id && list[k].id === item.id) { idx = k; break; }
++              if (!list[k].id && list[k].url === item.url) { idx = k; break; }
++            }
++            if (idx < 0) idx = 0;
++            openAiPreviewWithList(list, idx);
+           });
+           card.appendChild(img);
+         } else {
+@@ -4004,7 +4362,14 @@
+ 
+         var meta = document.createElement('div');
+         meta.className = 'ai-result-meta';
+-        meta.textContent = item.label;
++        var name = document.createElement('div');
++        name.className = 'ai-result-name';
++        name.textContent = item.label;
++        meta.appendChild(name);
++        var sizeEl = document.createElement('div');
++        sizeEl.className = 'ai-result-size';
++        sizeEl.textContent = extractSizeText(item.size || '') || '';
++        meta.appendChild(sizeEl);
+         card.appendChild(meta);
+ 
+         var prog = typeof item.progress === 'number' ? item.progress : (item.url ? 100 : 5);
+@@ -4034,6 +4399,10 @@
+         card.addEventListener('click', function () {
+           selectAiImage(item.id);
+         });
++        card.addEventListener('contextmenu', function (e) {
++          if (e && e.preventDefault) e.preventDefault();
++          openResultContextMenu(item, e.clientX, e.clientY);
++        });
+         grid.appendChild(card);
+       });
+       aiResultEl.appendChild(grid);
+@@ -5404,6 +5773,18 @@
+       zoomPreviewStep(1);
+     });
+   }
++  if (aiPreviewPrevBtn) {
++    aiPreviewPrevBtn.classList.add('preview-nav');
++    aiPreviewPrevBtn.addEventListener('click', function () {
++      navigatePreview(-1);
++    });
++  }
++  if (aiPreviewNextBtn) {
++    aiPreviewNextBtn.classList.add('preview-nav');
++    aiPreviewNextBtn.addEventListener('click', function () {
++      navigatePreview(1);
++    });
++  }
+   if (aiPreviewMaxBtn) {
+     aiPreviewMaxBtn.addEventListener('click', function () {
+       togglePreviewMax();
+@@ -5428,6 +5809,15 @@
+   if (aiPreviewBody) {
+     aiPreviewBody.addEventListener('wheel', function (e) {
+       if (!e) return;
++      if (!e.ctrlKey && !e.metaKey && aiPreviewList && aiPreviewList.length > 1) {
++        var now = Date.now();
++        if (now - aiPreviewWheelLock > 240) {
++          aiPreviewWheelLock = now;
++          navigatePreview(e.deltaY > 0 ? 1 : -1);
++        }
++        if (e.preventDefault) e.preventDefault();
++        return;
++      }
+       if (e.preventDefault) e.preventDefault();
+       var rect = aiPreviewBody.getBoundingClientRect();
+       var px = e.clientX - rect.left;
+@@ -5583,6 +5973,19 @@
+     });
+   }
+ 
++  // Fallback: delegate side-btn clicks in case direct bindings fail
++  document.addEventListener('click', function (e) {
++    var node = e && e.target;
++    while (node && node !== document.body) {
++      if (node.classList && node.classList.contains('side-btn')) {
++        var mode = node.getAttribute('data-mode') || 'browser';
++        setMode(mode);
++        break;
++      }
++      node = node.parentNode;
++    }
++  });
++
+   // 顶部下拉菜单已移除
+ 
+   if (saveBtn) {

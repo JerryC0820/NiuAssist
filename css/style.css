@@ -1653,13 +1653,26 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 
 .ai-result-meta {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.ai-result-name {
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: 100%;
+}
+
+.ai-result-size {
+  font-size: 10px;
+  color: #7a7a7a;
 }
 
 .ai-preview {
@@ -1883,9 +1896,24 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
 .ai-history-meta {
   font-size: 11px;
   color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-history-name {
+  font-size: 11px;
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: 100%;
+}
+
+.ai-history-size {
+  font-size: 10px;
+  color: #7a7a7a;
 }
 
 .ai-history-actions {
@@ -2026,6 +2054,15 @@ body.narrow-ui .ai-feature-item .ai-feature-item-icon {
   font-size: 11px;
   padding: 2px 6px;
   cursor: pointer;
+}
+
+.ai-preview-actions button.preview-nav {
+  min-width: 34px;
+}
+
+.ai-preview-actions button.preview-nav[disabled] {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .ai-preview-actions button:hover {
@@ -2460,7 +2497,9 @@ body.ai-type-text .ai-config-section {
 
 .ai-context-menu {
   position: fixed;
-  min-width: 180px;
+  width: max-content;
+  min-width: 140px;
+  max-width: 320px;
   background: #1d1d1d;
   border: 1px solid #2b2b2b;
   border-radius: 10px;
@@ -2479,6 +2518,7 @@ body.ai-type-text .ai-config-section {
   border-radius: 8px;
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .ai-context-menu button:hover {

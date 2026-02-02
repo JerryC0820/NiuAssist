@@ -49,3 +49,13 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - CEP Node require fallback restored for file/copy operations.
 - Clipboard copy on Windows now uses PowerShell STA to improve reliability.
+
+## [1.0.6] - 2026-02-02
+### Updated
+- Result/album context menu width now auto-sizes to content.
+- Result cards now support right-click actions (open/insert/replace/open folder/prompt).
+- Preview toolbar includes prev/next navigation controls.
+- Cache root normalized to Photoshop install `invalidParam\\NiuAssistCache`.
+### Fixed
+- History read fallback from meta when index is missing or relative paths break.
+- Progress no longer stuck at 70% when cache path is unavailable.
